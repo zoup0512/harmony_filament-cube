@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "离线多阶魔方元服务" },
+    { "name": "ability_desc", "value": "Razor Cube 魔方" },
+    { "name": "EntryAbility_label", "value": "Razor Cube 魔方" }
+  ]
+}

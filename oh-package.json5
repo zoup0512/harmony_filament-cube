@@ -1,0 +1,8 @@
+{
+  "modelVersion": "6.1.0",
+  "name": "razor-cube-atomic-service",
+  "version": "1.0.0",
+  "description": "Razor Cube offline HarmonyOS atomic service",
+  "dependencies": {},
+  "devDependencies": {}
+}

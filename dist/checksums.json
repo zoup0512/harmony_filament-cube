@@ -1,0 +1,12 @@
+[
+  {
+    "file": "razor-cube-debug-unsigned.hap",
+    "bytes": 277142,
+    "sha256": "3038acbec923d8303932110c9ac9791b290a43e34464c2318503d8cc429af466"
+  },
+  {
+    "file": "razor-cube-release-unsigned.hap",
+    "bytes": 108196,
+    "sha256": "27612a7448f7d28ada1c0a64ebbbc99b67d1ccbfaf94144648e3773c3916a8ff"
+  }
+]

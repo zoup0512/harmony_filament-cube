@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Razor Cube atomic service entry",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}
