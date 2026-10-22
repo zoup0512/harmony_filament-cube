@@ -449,6 +449,56 @@ test('Android score and ambiguity gates reject diagonals, including two high-sco
   assert.ok(lowScore > 0 && ambiguous > 0 && accepted > 0);
 });
 
+test('beginner arrows fit stickers and match reversible row/column gestures across views', () => {
+  let checked = 0;
+  for (const order of [2, 3, 4, 5]) {
+    const model = seededModel(order);
+    const before = snapshot(model);
+    for (const [w, h] of [[280, 240], [420, 500]]) {
+      for (const yaw of yawAngles) {
+        for (const pitch of pitchAngles) {
+          const renderer = new CubeRenderer();
+          renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch);
+          const guides = renderer.getBeginnerGuides();
+          for (const guide of guides) {
+            const { startX: x, startY: y } = guide;
+            const dx = guide.endX - x;
+            const dy = guide.endY - y;
+            const radius = Math.hypot(dx, dy);
+            assert.ok(radius >= 5.5 - 1e-9 && radius <= 12 + 1e-9);
+            const hit = renderer.boxHit(x, y);
+            assert.ok(hit);
+            const face = renderer.faces.find(f => f.sticker.length === 4 &&
+              axes.every(axis => f[axis] === hit[axis] && f.normal[axis] === hit.normal[axis]));
+            assert.ok(face, 'marker must start on a visible sticker');
+            for (let j = 0; j < 4; j++) {
+              const a = face.sticker[j];
+              const b = face.sticker[(j + 1) % 4];
+              const clearance = Math.abs((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)) /
+                Math.hypot(b.x - a.x, b.y - a.y);
+              assert.ok(clearance >= radius + 2 - 1e-7, 'shaft, heads and halo must fit inside sticker');
+            }
+            const forward = renderer.pickMove(x, y, x + dx / radius * 55, y + dy / radius * 55, model, yaw, pitch);
+            const backward = renderer.pickMove(x, y, x - dx / radius * 55, y - dy / radius * 55, model, yaw, pitch);
+            assert.ok(forward && backward, 'both displayed directions must accept a full swipe');
+            assert.equal(forward.axis, backward.axis);
+            assert.equal(forward.layer, hit[forward.axis]);
+            assert.equal(backward.layer, forward.layer);
+            assert.equal(forward.turns, -backward.turns);
+            assert.equal(hit.normal[forward.axis], 0, 'arrows describe tangential row/column turns');
+            checked++;
+          }
+          if (yaw === 0.62 && pitch === -0.42) {
+            assert.ok(guides.length > 0, `default view must show beginner arrows for ${order}x${order}`);
+          }
+        }
+      }
+    }
+    assert.equal(snapshot(model), before, 'guides must not affect puzzle state or history');
+  }
+  assert.ok(checked > 1000);
+});
+
 class GuideCanvas extends CheckingCanvas {
   arcs = [];
   strokes = [];
@@ -464,6 +514,45 @@ class GuideCanvas extends CheckingCanvas {
     this.strokes.push(this.strokeStyle);
   }
 }
+
+test('beginner overlay restores Canvas and hides stale, animated or unreadably small markers', () => {
+  const renderer = new CubeRenderer();
+  const model = new CubeModel(3);
+  const context = new CheckingCanvas();
+  const overlay = new GuideCanvas();
+  const move = new CubeMove('x', 0, 1);
+  assert.deepEqual(renderer.getBeginnerGuides(), []);
+  renderer.draw(context, width, height, model, 0.62, -0.42);
+  const guides = renderer.getBeginnerGuides();
+  assert.ok(guides.length > 0);
+  const before = geometry(renderer);
+  overlay.globalAlpha = 0.3;
+  overlay.strokeStyle = '#123456';
+  renderer.drawBeginnerGuides(overlay);
+  assert.equal(overlay.globalAlpha, 0.3);
+  assert.equal(overlay.strokeStyle, '#123456');
+  assert.equal(overlay.lineWidth, 1);
+  assert.equal(overlay.stack.length, 0);
+  assert.equal(overlay.clears, 0);
+  assert.equal(overlay.strokes.length, guides.length * 2);
+  assert.deepEqual(geometry(renderer), before);
+  for (const progress of [0, 0.5, 1]) {
+    renderer.draw(context, width, height, model, 0.62, -0.42, move, progress);
+    assert.deepEqual(renderer.getBeginnerGuides(), []);
+    renderer.drawBeginnerGuides(overlay);
+    assert.equal(overlay.strokes.length, guides.length * 2);
+  }
+  renderer.draw(context, width, height, model, 0.62, -0.42);
+  model.applyMove(move, false);
+  assert.deepEqual(renderer.getBeginnerGuides(), []);
+  renderer.draw(context, width, height, model, 0.62, -0.42);
+  model.reset();
+  assert.deepEqual(renderer.getBeginnerGuides(), []);
+  renderer.draw(context, 24, 24, model, 0.62, -0.42);
+  assert.deepEqual(renderer.getBeginnerGuides(), []);
+  renderer.draw(context, 0, height, model, 0.62, -0.42);
+  assert.deepEqual(renderer.getBeginnerGuides(), []);
+});
 
 test('guide cache lifetime, invalidation, logical units, overlay and Canvas restoration', () => {
   const renderer = new CubeRenderer();

@@ -20,6 +20,7 @@ struct Index {
   @State private speed: number = 1;
   @State private sound: boolean = false;
   @State private haptics: boolean = true;
+  @State private beginnerGuides: boolean = true;
   @State private defaultOrder: number = 3;
   @State private records: SolveRecord[] = [];
   @State private loaded: boolean = false;
@@ -99,6 +100,7 @@ struct Index {
       this.speed = this.store.settings.speed;
       this.sound = this.store.settings.sound;
       this.haptics = this.store.settings.haptics;
+      this.beginnerGuides = this.store.settings.beginnerGuides;
       this.records = this.store.records.slice();
       this.invalidateGesture(true);
       this.model.reset(this.order);
@@ -156,6 +158,8 @@ struct Index {
         if (target !== null) {
           const guide = this.renderer.getSwipeGuide(target);
           if (guide !== null) { this.renderer.drawGuide(this.context2d, guide); }
+        } else if (this.beginnerGuides) {
+          this.renderer.drawBeginnerGuides(this.context2d);
         }
       }
     }
@@ -560,12 +564,19 @@ struct Index {
     }
   }
 
+  private setBeginnerGuides(value: boolean): void {
+    this.beginnerGuides = value;
+    this.draw();
+    this.saveSettings();
+  }
+
   private saveSettings(): void {
     const settings = new CubeSettings();
     settings.defaultOrder = this.defaultOrder;
     settings.speed = this.speed;
     settings.sound = this.sound;
     settings.haptics = this.haptics;
+    settings.beginnerGuides = this.beginnerGuides;
     this.store.saveSettings(settings).catch(() => this.toast('设置保存失败，请稍后重试。'));
   }
 
@@ -821,8 +832,15 @@ struct Index {
           this.cubeStage()
         }.width('100%').height(Math.max(240, Math.min(480, this.viewportHeight - (this.hint.length > 0 ? 450 : 370))))
         Row({ space: 6 }) {
-          Text('滑动转层 · 空白或双指转视角').fontSize(10).fontColor(CubeTheme.secondary).layoutWeight(1)
-          Button('正视角', { type: ButtonType.Normal }).height(44).fontSize(11).borderRadius(12)
+          Text('箭头示意沿行/列滑动，松手转层（非点击）\n空白或双指转视角')
+            .fontSize(10).lineHeight(16).fontColor(CubeTheme.secondary).layoutWeight(1)
+          Button(`箭头 ${this.beginnerGuides ? '开' : '关'}`, { type: ButtonType.Normal })
+            .width(58).height(44).padding({ left: 4, right: 4 }).fontSize(11).borderRadius(12)
+            .backgroundColor(this.beginnerGuides ? CubeTheme.mint : CubeTheme.surface).fontColor(CubeTheme.green)
+            .accessibilityText(`新手方向箭头，${this.beginnerGuides ? '已开启' : '已关闭'}`)
+            .onClick(() => this.setBeginnerGuides(!this.beginnerGuides))
+          Button('正视角', { type: ButtonType.Normal }).width(58).height(44)
+            .padding({ left: 4, right: 4 }).fontSize(11).borderRadius(12)
             .backgroundColor(CubeTheme.surface).fontColor(CubeTheme.green)
             .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
         }.width('100%')
@@ -982,6 +1000,17 @@ struct Index {
             }.width('100%')
           }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
           Column({ space: 18 }) {
+            Row({ space: 12 }) {
+              Column({ space: 5 }) {
+                Text('新手方向箭头').fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+                Text('沿行/列滑动，松手转层；非点击\n仅提示操作方向，不提供还原答案')
+                  .fontSize(11).lineHeight(17).fontColor(CubeTheme.secondary)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.beginnerGuides }).selectedColor(CubeTheme.green)
+                .accessibilityText('新手方向箭头')
+                .onChange((value: boolean) => this.setBeginnerGuides(value))
+            }.width('100%')
+            Divider().color(CubeTheme.line)
             Row() {
               Column({ space: 5 }) {
                 Text('转动音效').fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)

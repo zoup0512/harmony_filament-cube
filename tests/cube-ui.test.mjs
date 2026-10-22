@@ -37,7 +37,8 @@ test('canvas remains gesture-driven and tutorial/help text explains arrows inste
   assert.match(canvas, /Canvas\(this\.context2d\)/);
   assert.match(canvas, /\.onTouch\(\(event: TouchEvent\) => this\.touch\(event\)\)/);
   assert.match(canvas, /accessibilityText\([^\r\n]*滑动[^\r\n]*松手转动一层[^\r\n]*双指/);
-  assert.match(member('gamePage'), /滑动转层[^\r\n]*空白或双指转视角/);
+  assert.match(member('gamePage'), /箭头示意沿行\/列滑动，松手转层（非点击）/);
+  assert.match(member('gamePage'), /空白或双指转视角/);
   for (const name of ['updateLessonHint', 'showHint', 'requestMove']) {
     const method = member(name);
     assert.match(method, /沿箭头滑动/);
@@ -62,6 +63,33 @@ for (const [label, handler] of [
     if (handler === 'undo') assert.match(block, /this\.moves > 0/);
   });
 }
+
+test('game direction toggle shares the help row with flexible text, not a canvas overlay', () => {
+  const game = member('gamePage');
+  const help = game.slice(game.indexOf("Text('箭头示意"), game.indexOf('if (this.hint.length > 0)'));
+  assert.match(help, /\.layoutWeight\(1\)/, 'help text must wrap in remaining narrow-screen width');
+  assert.match(help, /Button\(`箭头 \$\{this\.beginnerGuides \? '开' : '关'\}`/);
+  assert.match(help, /\.width\(58\)\.height\(44\)/, 'compact controls retain a 44vp touch target');
+  assert.match(help, /\.accessibilityText\(`新手方向箭头/);
+  assert.match(help, /\.onClick\(\(\) => this\.setBeginnerGuides\(!this\.beginnerGuides\)\)/);
+  assert.match(help, /Button\('正视角'/);
+  assert.equal((game.match(/this\.cubeStage\(\)/g) ?? []).length, 1);
+  assert.doesNotMatch(member('cubeStage'), /beginnerGuides|Button\(|Toggle\(|\.onTouch\(/);
+  assert.doesNotMatch(member('cubeCanvas'), /beginnerGuides|Button\(|Toggle\(/);
+});
+
+test('settings direction switch uses the same handler and explains directions are not solve answers', () => {
+  const settings = member('settingsPage');
+  const start = settings.indexOf("Text('新手方向箭头')");
+  assert.ok(start >= 0);
+  const control = settings.slice(start, settings.indexOf("Text('转动音效')"));
+  assert.match(control, /沿行\/列滑动，松手转层；非点击/);
+  assert.match(control, /不提供还原答案/);
+  assert.match(control, /\.layoutWeight\(1\)/);
+  assert.match(control, /Toggle\(\{ type: ToggleType\.Switch, isOn: this\.beginnerGuides \}\)/);
+  assert.match(control, /\.accessibilityText\('新手方向箭头'\)/);
+  assert.match(control, /\.onChange\(\(value: boolean\) => this\.setBeginnerGuides\(value\)\)/);
+});
 
 test('game retains view reset, canvas, time and move count', () => {
   const block = buttonBlock('正视角');

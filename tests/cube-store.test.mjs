@@ -24,7 +24,7 @@ const { CubeStore, CubeSettings, SolveRecord, default: DefaultStore } = await im
   dataURL(stripTypeScriptTypes(rewritten, { mode: 'strip' }))
 );
 
-const defaults = { defaultOrder: 3, speed: 1, sound: false, haptics: true };
+const defaults = { defaultOrder: 3, speed: 1, sound: false, haptics: true, beginnerGuides: true };
 const settings = overrides => ({ ...defaults, ...overrides });
 const record = overrides => ({ order: 3, durationMs: 1234.5, moves: 20, date: 100, ...overrides });
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -97,6 +97,10 @@ const invalidSettings = invalidObjects(settings(), {
   sound: [0, 1, 'false', null, undefined],
   haptics: [0, 1, 'true', null, undefined]
 });
+// Missing beginnerGuides is a supported legacy setting, not a validation error.
+for (const value of [0, 1, 'false', 'true', null, [], {}]) {
+  invalidSettings.push([`beginnerGuides=${String(value)}`, settings({ beginnerGuides: value })]);
+}
 const invalidRecords = invalidObjects(record(), {
   order: invalidOrders,
   durationMs: [-1, NaN, Infinity, -Infinity, '123', null, true],
@@ -136,6 +140,34 @@ test('valid stored JSON loads known fields into settings and record instances', 
   assert.ok(store.records[0] instanceof SolveRecord);
   assert.deepEqual(calls, [], 'loading must not rewrite preferences');
 });
+
+test('legacy settings enable beginner arrows without resetting existing preferences or rewriting storage', async () => {
+  const legacy = { defaultOrder: 5, speed: 1.7, sound: true, haptics: false };
+  const json = JSON.stringify(legacy);
+  const { store, calls, durable } = await loaded({ settings: json });
+  assert.deepEqual(plain(store.settings), { ...legacy, beginnerGuides: true });
+  assert.deepEqual(calls, []);
+  assert.equal(durable.get('settings'), json);
+  await store.saveSettings(legacy);
+  assert.deepEqual(JSON.parse(durable.get('settings')), { ...legacy, beginnerGuides: true });
+});
+
+for (const beginnerGuides of [false, true]) {
+  test(`beginnerGuides=${beginnerGuides} survives save, snapshot, and a fresh load`, async () => {
+    const { store, durable, context } = await loaded();
+    const input = settings({ defaultOrder: 2, speed: 1.4, beginnerGuides });
+    const expected = { ...input };
+    const saving = store.saveSettings(input);
+    input.beginnerGuides = !beginnerGuides;
+    await saving;
+    assert.deepEqual(plain(store.settings), expected);
+    assert.deepEqual(JSON.parse(durable.get('settings')), expected);
+    const reloaded = new CubeStore();
+    await reloaded.load(context);
+    assert.deepEqual(plain(reloaded.settings), expected);
+    assert.equal(reloaded.settings.beginnerGuides, beginnerGuides);
+  });
+}
 
 test('malformed JSON and non-string preferences recover each key independently', async () => {
   const goodSettings = settings({ defaultOrder: 4 });

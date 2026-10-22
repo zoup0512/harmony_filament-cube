@@ -372,6 +372,93 @@ export class CubeRenderer {
     return best;
   }
 
+  /** Small bidirectional markers stay inside stickers; they are not solution hints. */
+  getBeginnerGuides(): CubeSwipeGuide[] {
+    const guides: CubeSwipeGuide[] = [];
+    const model: CubeModel | null = this.lastModel;
+    if (model === null || !this.cacheIsCurrent()) { return guides; }
+    const axes: string[] = ['x', 'y', 'z'];
+    for (let i: number = 0; i < this.faces.length; i++) {
+      const face: CubeVisibleFace = this.faces[i];
+      if (face.sticker.length !== 4) { continue; }
+      let x: number = 0;
+      let y: number = 0;
+      for (let j: number = 0; j < 4; j++) {
+        x += face.sticker[j].x / 4;
+        y += face.sticker[j].y / 4;
+      }
+      const hit: CubeSurfaceHit | null = this.boxHit(x, y);
+      if (hit === null || hit.x !== face.x || hit.y !== face.y || hit.z !== face.z ||
+        hit.normal.x !== face.normal.x || hit.normal.y !== face.normal.y ||
+        hit.normal.z !== face.normal.z) { continue; }
+      let clearance: number = Math.min(x, y, this.width - x, this.height - y);
+      for (let j: number = 0; j < 4; j++) {
+        const a: CubePoint2 = face.sticker[j];
+        const b: CubePoint2 = face.sticker[(j + 1) % 4];
+        const edgeLength: number = Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+        if (edgeLength < 0.0001) { clearance = 0; break; }
+        clearance = Math.min(clearance,
+          Math.abs((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)) / edgeLength);
+      }
+      const radius: number = Math.min(12, clearance - 2);
+      // Edge-on or tiny stickers cannot carry a readable marker without spilling.
+      if (radius < 5.5) { continue; }
+      for (let j: number = 0; j < axes.length; j++) {
+        const axis: string = axes[j];
+        const tangent: CubePoint2 = this.swipeTangent(face.normal, axis);
+        const length: number = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+        if (length < 0.0001) { continue; }
+        const ux: number = tangent.x / length;
+        const uy: number = tangent.y / length;
+        const forward: CubeMove | null = this.pickMove(x, y, x + ux * 55, y + uy * 55,
+          model, this.lastYaw, this.lastPitch);
+        const backward: CubeMove | null = this.pickMove(x, y, x - ux * 55, y - uy * 55,
+          model, this.lastYaw, this.lastPitch);
+        if (forward === null || backward === null || forward.axis !== axis || backward.axis !== axis ||
+          forward.layer !== this.layerCoordinate(face.cubie, axis) || backward.layer !== forward.layer ||
+          forward.turns !== 1 || backward.turns !== -1) { continue; }
+        guides.push(new CubeSwipeGuide(x, y, x + ux * radius, y + uy * radius));
+      }
+    }
+    return guides;
+  }
+
+  drawBeginnerGuides(ctx: CanvasRenderingContext2D): void {
+    const guides: CubeSwipeGuide[] = this.getBeginnerGuides();
+    if (guides.length === 0) { return; }
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.lineJoin = 'round';
+    // Paint all halos first so intersecting directions share one clean outline.
+    for (let pass: number = 0; pass < 2; pass++) {
+      ctx.strokeStyle = pass === 0 ? '#FFFFFF' : '#173B32';
+      ctx.lineWidth = pass === 0 ? 3.4 : 1.4;
+      for (let i: number = 0; i < guides.length; i++) {
+        const guide: CubeSwipeGuide = guides[i];
+        const dx: number = guide.endX - guide.startX;
+        const dy: number = guide.endY - guide.startY;
+        const length: number = Math.sqrt(dx * dx + dy * dy);
+        const ux: number = dx / length;
+        const uy: number = dy / length;
+        const head: number = Math.min(3.5, length * 0.42);
+        ctx.beginPath();
+        ctx.moveTo(guide.startX - dx, guide.startY - dy);
+        ctx.lineTo(guide.endX, guide.endY);
+        for (let direction: number = -1; direction <= 1; direction += 2) {
+          const tipX: number = guide.startX + direction * dx;
+          const tipY: number = guide.startY + direction * dy;
+          ctx.moveTo(tipX - direction * ux * head - uy * head * 0.65,
+            tipY - direction * uy * head + ux * head * 0.65);
+          ctx.lineTo(tipX, tipY);
+          ctx.lineTo(tipX - direction * ux * head + uy * head * 0.65,
+            tipY - direction * uy * head - ux * head * 0.65);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
   /** Call after draw(). Does not clear or change the cached scene/touch geometry. */
   drawGuide(ctx: CanvasRenderingContext2D, guide: CubeSwipeGuide): void {
     let dx: number = guide.endX - guide.startX;

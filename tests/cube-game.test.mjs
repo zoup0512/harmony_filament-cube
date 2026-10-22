@@ -15,11 +15,12 @@ const names = [
   'startTimers', 'stopTimers', 'onForegroundChanged', 'draw', 'frame', 'animate',
   'resetSession', 'chooseOrder', 'startGame', 'leavePage', 'doScramble',
   'faceMove', 'moveLabel', 'sameMove', 'requestMove', 'undo', 'showHint',
-  'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast'
+  'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast',
+  'loadData', 'saveSettings', 'setBeginnerGuides'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
-    `^  private ${name}\\([^\\r\\n]*\\)[^\\r\\n]*\\{\\r?\\n[\\s\\S]*?^  \\}`, 'gm'))];
+    `^  private (?:async )?${name}\\([^\\r\\n]*\\)[^\\r\\n]*\\{\\r?\\n[\\s\\S]*?^  \\}`, 'gm'))];
   assert.equal(matches.length, 1, `Index.ets must contain exactly one ${name} method`);
   return matches[0][0];
 });
@@ -31,8 +32,11 @@ const declarations = fields[1].replace(/@\w+(?:\([^\r\n)]*\))?\s*/g, '');
 const storeSource = readFileSync(new URL('../entry/src/main/ets/storage/CubeStore.ets', import.meta.url), 'utf8');
 const recordClasses = [...storeSource.matchAll(/^export class SolveRecord \{\r?\n[\s\S]*?^\}/gm)];
 assert.equal(recordClasses.length, 1, 'use the real SolveRecord value object');
+const settingsClasses = [...storeSource.matchAll(/^export class CubeSettings \{\r?\n[\s\S]*?^\}/gm)];
+assert.equal(settingsClasses.length, 1, 'use the real CubeSettings defaults');
 const executable = stripTypeScriptTypes([
   recordClasses[0][0].replace(/^export /, ''),
+  settingsClasses[0][0].replace(/^export /, ''),
   `class GameHarness {\n${declarations}\n${members.join('\n')}\n}`,
   'GameHarness;'
 ].join('\n'));
@@ -47,7 +51,10 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   let now = 1_000_000;
   let nextTimer = 0;
   const timers = new Map();
-  const calls = { draw: [], getSwipeGuide: [], drawGuide: [], feedback: [], records: [], pending: [], toasts: [] };
+  const calls = {
+    draw: [], getSwipeGuide: [], drawGuide: [], drawBeginnerGuides: [],
+    feedback: [], records: [], pending: [], toasts: [], settings: []
+  };
   const guide = guideVisible ? { startX: 100, startY: 120, endX: 150, endY: 140 } : null;
   class FakeDate extends Date {
     constructor(...args) { super(...(args.length ? args : [now])); }
@@ -55,6 +62,11 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   }
   class MockStore {
     records = [];
+    async load() {}
+    async saveSettings(settings) {
+      calls.settings.push(settings);
+      this.settings = settings;
+    }
     addRecord(record) {
       calls.records.push(record);
       // Controllable persistence, so tests observe both the pending UI and races.
@@ -72,8 +84,12 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
       draw(...args) { calls.draw.push(args); }
       getSwipeGuide(...args) { calls.getSwipeGuide.push(args); return guide; }
       drawGuide(...args) { calls.drawGuide.push(args); }
+      drawBeginnerGuides(...args) { calls.drawBeginnerGuides.push(args); }
     },
-    CubeFeedback: class { play(...args) { calls.feedback.push(args); } },
+    CubeFeedback: class {
+      play(...args) { calls.feedback.push(args); }
+      async prepare() {}
+    },
     CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
     setInterval(callback, delay) {
       const id = nextTimer++;
@@ -87,6 +103,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   state.order = order;
   state.speed = speed;
   state.getUIContext = () => ({
+    getHostContext: () => ({}),
     getPromptAction: () => ({ showToast: ({ message }) => calls.toasts.push(message) })
   });
   state.startGame();
@@ -107,6 +124,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
       assert.equal(calls.draw.length, 0, 'draw must not access an unready Canvas');
       assert.equal(calls.getSwipeGuide.length, 0);
       assert.equal(calls.drawGuide.length, 0);
+      assert.equal(calls.drawBeginnerGuides.length, 0);
     }
   });
   return { state, calls, clock, guide };
@@ -353,6 +371,121 @@ test('tutorial rejects the wrong move, advances only after commits and never sav
   assert.equal(s.startedAt, 0);
   assert.equal(calls.feedback.length, 5);
   assert.match(s.hint, /教程完成/);
+});
+
+test('beginner arrows default on; toggling redraws immediately and persists without changing the session', t => {
+  const h = harness(t, { canvasReady: true });
+  const { state: s, calls } = h;
+  assert.equal(s.beginnerGuides, true);
+  s.draw();
+  assert.deepEqual(calls.drawBeginnerGuides, [[s.context2d]]);
+  assert.equal(calls.getSwipeGuide.length, 0, 'directions must not request a solution guide');
+  const before = snapshot(s.model);
+  s.setBeginnerGuides(false);
+  assert.equal(s.beginnerGuides, false);
+  assert.equal(calls.draw.length, 2, 'turning off clears arrows by repainting the cube');
+  assert.equal(calls.drawBeginnerGuides.length, 1);
+  assert.equal(calls.settings.at(-1).beginnerGuides, false);
+  s.draw();
+  assert.equal(calls.drawBeginnerGuides.length, 1, 'off stays hidden on subsequent frames');
+  s.setBeginnerGuides(true);
+  assert.equal(calls.drawBeginnerGuides.length, 2);
+  assert.equal(calls.settings.at(-1).beginnerGuides, true);
+  assert.equal(snapshot(s.model), before);
+  assert.equal(s.phase, 'idle');
+  assert.equal(s.assisted, false);
+  assert.equal(s.startedAt, 0);
+  assert.equal(s.elapsed, 0);
+  assertQuiet(h);
+});
+
+for (const enabled of [false, true]) {
+  test(`loadData restores beginnerGuides=${enabled} and saving other preferences retains it`, async t => {
+    const h = harness(t, { canvasReady: true });
+    const { state: s, calls } = h;
+    s.store.settings = { defaultOrder: 4, speed: 1.5, sound: true, haptics: false, beginnerGuides: enabled };
+    await s.loadData();
+    assert.equal(s.loaded, true);
+    assert.equal(s.storageWarning, '');
+    assert.equal(s.beginnerGuides, enabled);
+    assert.equal(calls.drawBeginnerGuides.length, enabled ? 1 : 0);
+    s.speed = 2;
+    s.saveSettings();
+    assert.deepEqual({ ...calls.settings.at(-1) }, {
+      defaultOrder: 4, speed: 2, sound: true, haptics: false, beginnerGuides: enabled
+    });
+  });
+}
+
+test('beginner arrows never draw while busy or outside the game', t => {
+  const { state: s, calls } = harness(t, { canvasReady: true });
+  for (const page of ['home', 'stats', 'settings', 'game']) {
+    s.page = page;
+    for (const busy of [false, true]) {
+      if (page === 'game' && !busy) continue;
+      s.busy = busy;
+      s.draw();
+    }
+  }
+  assert.equal(calls.drawBeginnerGuides.length, 0);
+  assert.equal(calls.getSwipeGuide.length, 0);
+  assert.equal(calls.drawGuide.length, 0);
+  s.busy = false;
+  s.draw();
+  assert.equal(calls.drawBeginnerGuides.length, 1);
+});
+
+for (const kind of ['tutorial', 'history']) {
+  for (const guideVisible of [true, false]) {
+    test(`${kind} target takes priority even when its guide is ${guideVisible ? 'visible' : 'hidden'}`, t => {
+      const { state: s, calls, guide } = harness(t, { canvasReady: true, guideVisible });
+      s.hintMove = s.faceMove('R');
+      if (kind === 'tutorial') {
+        s.phase = 'tutorial';
+        s.lesson = [s.faceMove('U')];
+      }
+      const target = kind === 'tutorial' ? s.lesson[0] : s.hintMove;
+      for (const enabled of [true, false]) {
+        s.beginnerGuides = enabled;
+        s.draw();
+        assert.equal(calls.getSwipeGuide.at(-1)[0], target);
+        if (guideVisible) assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide]);
+        else assert.equal(calls.drawGuide.length, 0);
+        assert.equal(calls.drawBeginnerGuides.length, 0, 'never fall back to directions for a hidden target');
+      }
+      s.phase = 'idle';
+      s.hintMove = null;
+      s.beginnerGuides = true;
+      s.draw();
+      assert.equal(calls.drawBeginnerGuides.length, 1, 'directions return only after clearing the target');
+    });
+  }
+}
+
+test('beginner arrows and their toggle do not mark a timed solve assisted or restart its clock', async t => {
+  const h = harness(t, { canvasReady: true });
+  const { state: s, calls, clock } = h;
+  const { inverse } = oneMoveAway(h);
+  s.setBeginnerGuides(false);
+  s.setBeginnerGuides(true);
+  assert.equal(s.phase, 'ready');
+  assert.equal(s.startedAt, 0);
+  assert.equal(s.assisted, false);
+  assert.ok(calls.drawBeginnerGuides.length > 0);
+  s.requestMove(inverse);
+  const start = s.startedAt;
+  clock.advance(100);
+  const arrows = calls.drawBeginnerGuides.length;
+  s.setBeginnerGuides(false);
+  s.setBeginnerGuides(true);
+  assert.equal(calls.drawBeginnerGuides.length, arrows, 'toggling during animation must not draw arrows');
+  assert.equal(s.startedAt, start);
+  assert.equal(s.assisted, false);
+  completeMove(h, 120);
+  assert.equal(s.phase, 'solved');
+  assert.equal(s.elapsed, 220);
+  assert.equal(calls.records.length, 1);
+  await settle(h);
 });
 
 test('ready canvas draws the current lesson arrow and hides it throughout animation', t => {
