@@ -5,14 +5,24 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { stripTypeScriptTypes } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = process.env.SMOKE_OUT ? resolve(process.env.SMOKE_OUT) : join(ROOT, 'verification', 'ui');
+// SMOKE_CASES=order-4,tutorial selects exact case names; unknown names fail before HDC.
+// --check-gestures runs ONLY the real renderer/model checks, without HDC or artifacts.
+const OUT = process.env.SMOKE_OUT ? resolve(process.env.SMOKE_OUT) : join(ROOT, 'verification', 'gestures');
+const CASE_NAMES = ['order-2', 'order-4', 'order-5', 'order-3', 'tutorial', 'free-move-undo',
+  'surface-swipe', 'scramble-timer-hint-back', 'statistics', 'settings-persistence'];
+const SELECTED_CASES = process.env.SMOKE_CASES === undefined ? null :
+  new Set(process.env.SMOKE_CASES.split(',').map(value => value.trim()).filter(Boolean));
+if (SELECTED_CASES && (SELECTED_CASES.size === 0 || [...SELECTED_CASES].some(name => !CASE_NAMES.includes(name)))) {
+  throw new Error(`SMOKE_CASES must contain comma-separated exact names: ${CASE_NAMES.join(', ')}`);
+}
 const HDC = 'C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/toolchains/hdc.exe';
 const TARGET = process.env.HDC_TARGET || '127.0.0.1:5633';
-const BUNDLE = 'com.razor.cube.atomic';
+const BUNDLE = JSON.parse(readFileSync(join(ROOT, 'AppScope', 'app.json5'), 'utf8')).app.bundleName;
 const REMOTE_JSON = '/data/local/tmp/razor-smoke.json';
 const RUN_ID = `${Date.now()}-${process.pid}`;
 const WAIT_MS = 15000;
@@ -193,6 +203,12 @@ async function tap(query, description = String(query)) {
   const state = await waitFor(`enabled button ${description}`, s => enabledButton(s, query));
   tapNode(button(state, query), description);
 }
+// The icon-only back button carries no text; its stable id is the only dump-visible locator.
+const backButton = state => state.nodes.find(n => n.a.id === 'back-button' && usable(n, state));
+async function tapBack() {
+  const state = await waitFor('enabled back button', s => backButton(s)?.enabled === true);
+  tapNode(backButton(state), 'back button');
+}
 function swipe(node, start, end, reason) {
   if (!usable(node) || !node.enabled) throw new Error(`ASSERTION FAILED: swipe target unavailable: ${reason}`);
   const b = node.bounds;
@@ -268,12 +284,147 @@ function centiseconds(state) {
   const match = timer(state)?.match(/^(\d+):(\d{2})\.(\d{2})$/);
   return match ? Number(match[1]) * 6000 + Number(match[2]) * 100 + Number(match[3]) : null;
 }
-const faceQuery = face => new RegExp(`^${face.replace("'", "['′’]")}(?: 面转动)?$`);
-const idleControls = state => enabledButton(state, faceQuery('U')) && enabledButton(state, '打乱');
+const gameCanvas = state => state.nodes.find(n => n.type === 'Canvas' && usable(n, state) && n.enabled);
+// Action buttons are disabled while the renderer is animating; face buttons no longer exist.
+const idleControls = state => Boolean(gameCanvas(state)) && enabledButton(state, '打乱') && enabledButton(state, '教程');
+function assertTouchOnly(state) {
+  // Inspect the entire dump, including offscreen/disabled descendants: hiding the old
+  // controls below a scroll boundary is not removal of the twelve face buttons.
+  const obsolete = state.nodes.filter(n =>
+    (n.type === 'Button' && descendants(n).some(child =>
+      [child.text, normalize(child.a.originalText), normalize(child.a.description)]
+        .some(text => /^[UDLRFB]'?(?:\s*面转动)?$/.test(text)))) ||
+    [n.text, normalize(n.a.originalText), normalize(n.a.description)].some(text => /转面控制|转面按钮/.test(text)));
+  check(obsolete.length === 0, 'no twelve face buttons or obsolete face-control title/instructions', {
+    obsolete: obsolete.map(n => ({ text: n.text, type: n.type, bounds: n.a.bounds }))
+  });
+  check(['打乱', '教程', '复位', /撤销/, '历史提示', '正视角'].every(label => button(state, label)),
+    'retains scramble/tutorial/reset/undo/history/view controls');
+}
 function lesson(state) {
-  const text = state.nodes.map(n => n.text).find(t => /第\s*\d+\s*\/\s*\d+\s*步/.test(t));
-  const match = text?.match(/第\s*(\d+)\s*\/\s*(\d+)\s*步[：:]\s*点击\s*([UDLRFB]'?)/);
+  const text = state.nodes.filter(n => usable(n, state)).map(n => n.text).find(t => /第\s*\d+\s*\/\s*\d+\s*步/.test(t));
+  const match = text?.match(/^第\s*(\d+)\s*\/\s*(\d+)\s*步[：:]\s*沿箭头滑动完成\s*([UDLRFB]'?)[。.]\s*\S/);
   return match ? { step: Number(match[1]), total: Number(match[2]), face: match[3], text } : null;
+}
+
+let geometryApi;
+async function loadGeometry() {
+  if (geometryApi) return geometryApi;
+  const modelPath = join(ROOT, 'entry/src/main/ets/model/CubeModel.ts');
+  const rendererPath = join(ROOT, 'entry/src/main/ets/render/CubeRenderer.ets');
+  const moduleUrl = (source, path) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source,
+    { mode: 'strip', sourceUrl: pathToFileURL(path).href })).toString('base64')}`;
+  const modelUrl = moduleUrl(readFileSync(modelPath, 'utf8'), modelPath);
+  const rendererSource = readFileSync(rendererPath, 'utf8');
+  if (!rendererSource.includes("'../model/CubeModel'")) throw new Error('Renderer model import changed; update the smoke loader explicitly.');
+  const rendererUrl = moduleUrl(rendererSource.replaceAll("'../model/CubeModel'", JSON.stringify(modelUrl)), rendererPath);
+  const { CubeModel, CubeMove } = await import(modelUrl);
+  const { CubeRenderer } = await import(rendererUrl);
+  if (typeof CubeRenderer.prototype.getSwipeGuide !== 'function') throw new Error('Actual CubeRenderer must implement getSwipeGuide(move).');
+  geometryApi = { CubeModel, CubeMove, CubeRenderer };
+  return geometryApi;
+}
+function drawGeometry(order, width, height) {
+  const { CubeModel, CubeRenderer } = geometryApi;
+  const model = new CubeModel(order);
+  const renderer = new CubeRenderer();
+  // Only drawing calls are mocked: projection, hit testing and gesture picking are real.
+  const ctx = Object.fromEntries(['save', 'restore', 'clearRect', 'beginPath', 'moveTo', 'lineTo',
+    'closePath', 'fill', 'stroke'].map(name => [name, () => {}]));
+  renderer.draw(ctx, width, height, model, 0.62, -0.42);
+  return { renderer, model, width, height };
+}
+function faceMove(face, order) {
+  const spec = { U: ['y', order - 1, -1], D: ['y', 0, 1], L: ['x', 0, 1],
+    R: ['x', order - 1, -1], F: ['z', order - 1, -1], B: ['z', 0, 1] }[face[0]];
+  if (!spec || !/^[UDLRFB]'?$/.test(face)) throw new Error(`Invalid face ${face}`);
+  const move = new geometryApi.CubeMove(spec[0], spec[1], spec[2] * (face.endsWith("'") ? -1 : 1));
+  if (move.label(order) !== face) throw new Error(`Model face notation mismatch: ${face}`);
+  return move;
+}
+function guidePixels(geometry, face, canvasBounds, scale) {
+  const { renderer, model, width, height } = geometry;
+  const move = faceMove(face, model.order);
+  const guide = renderer.getSwipeGuide(move);
+  if (!guide || !['startX', 'startY', 'endX', 'endY'].every(key => Number.isFinite(guide[key]))) {
+    throw new Error(`ASSERTION FAILED: no finite swipe guide for ${model.order}×${model.order} ${face}`);
+  }
+  const x1 = Math.round(canvasBounds.left + guide.startX * scale);
+  const y1 = Math.round(canvasBounds.top + guide.startY * scale);
+  const x2 = Math.round(canvasBounds.left + guide.endX * scale);
+  const y2 = Math.round(canvasBounds.top + guide.endY * scale);
+  const logical = [(x1 - canvasBounds.left) / scale, (y1 - canvasBounds.top) / scale,
+    (x2 - canvasBounds.left) / scale, (y2 - canvasBounds.top) / scale];
+  if (![0, 2].every(i => logical[i] > 0 && logical[i] < width && logical[i + 1] > 0 && logical[i + 1] < height)) {
+    throw new Error(`ASSERTION FAILED: ${face} guide leaves Canvas: ${JSON.stringify({ guide, logical, width, height })}`);
+  }
+  const picked = renderer.pickMove(...logical, model, 0.62, -0.42);
+  if (!picked || picked.axis !== move.axis || picked.layer !== move.layer || picked.turns !== move.turns) {
+    throw new Error(`ASSERTION FAILED: pixel-quantized ${face} guide picks wrong move: ${JSON.stringify({ move, picked, guide, logical })}`);
+  }
+  return { guide, move, logical, x1, y1, x2, y2 };
+}
+async function gestureGeometry(order) {
+  await tap('正视角'); // Synchronize the real camera with the renderer oracle before every swipe.
+  const state = await waitFor('Canvas and 44vp view button ready', s => isGame(s, order) && idleControls(s) && enabledButton(s, '正视角'));
+  const canvas = gameCanvas(state);
+  const scale = button(state, '正视角').bounds.height / 44;
+  if (!Number.isFinite(scale) || scale < 0.5 || scale > 8) throw new Error(`Invalid measured px/vp: ${scale}`);
+  const b = canvas.bounds;
+  const geometry = drawGeometry(order, b.width / scale, b.height / scale);
+  return { state, canvas, scale, geometry };
+}
+async function swipeFace(face, order = 3, reason = `surface ${face}`) {
+  const { canvas, scale, geometry } = await gestureGeometry(order);
+  const points = guidePixels(geometry, face, canvas.bounds, scale);
+  // Never send a guide into a clipped part of Canvas or another control.
+  for (const [x, y] of [[points.x1, points.y1], [points.x2, points.y2]]) {
+    for (const b of [latest.viewport, ...descendantsClips(canvas)]) {
+      if (x < b.left || x >= b.right || y < b.top || y >= b.bottom) throw new Error(`ASSERTION FAILED: clipped ${face} guide`);
+    }
+  }
+  summary.actions.push({ action: 'surface-swipe', reason, order, face, bounds: canvas.a.bounds,
+    pxPerVp: scale, scaleSource: '正视角 button height / 44vp', width: geometry.width, height: geometry.height, ...points });
+  saveSummary();
+  shell('uitest', 'uiInput', 'swipe', points.x1, points.y1, points.x2, points.y2, 600);
+}
+function descendantsClips(node) {
+  const clips = [];
+  for (let p = node.parent; p; p = p.parent) {
+    if ((p.a.clip === 'true' || p.type === 'Scroll') && p.bounds) clips.push(p.bounds);
+  }
+  return clips;
+}
+async function assertUnchanged(description, predicate) {
+  // Longer than a slow 440ms turn, and at least two independent dumps. A stale
+  // first frame is not evidence that an incorrect gesture or orbit was ignored.
+  const deadline = Date.now() + 1200;
+  let samples = 0;
+  do {
+    const state = dump();
+    if (!predicate(state)) throw new Error(`ASSERTION FAILED: ${description}\n${JSON.stringify(diagnostic(state))}`);
+    samples++;
+    if (Date.now() < deadline) await delay(160);
+  } while (Date.now() < deadline || samples < 2);
+  check(true, description, { samples });
+}
+async function checkGesturesOffline() {
+  await loadGeometry();
+  let checks = 0;
+  // Include small scenes and fractional densities; use the same rounding and
+  // pickMove guard as device injection. No generated copy of renderer geometry.
+  for (const order of [2, 3, 4, 5]) {
+    for (const [width, height] of [[300, 260], [360, 320], [480, 380]]) {
+      const geometry = drawGeometry(order, width, height);
+      for (const scale of [1, 1.5, 2, 2.75, 3.5]) {
+        for (const face of ['U', 'R', 'D', "L'", 'F', "U'", "R'"]) {
+          guidePixels(geometry, face, { left: 41, top: 203 }, scale);
+          checks++;
+        }
+      }
+    }
+  }
+  console.log(`Offline gesture checks passed: ${checks} real-renderer guides, including pixel quantization. No device commands sent.`);
 }
 function orderSelected(state, order) {
   const selected = button(state, `${order} 阶`);
@@ -294,7 +445,7 @@ async function restart() {
 async function home() {
   const state = dump();
   if (isHome(state)) return;
-  await tap(/^(‹|返回首页)$/);
+  await tapBack();
   const next = await waitFor('home or leave confirmation', s => isHome(s) || leaveDialogReady(s));
   if (leaveDialogReady(next)) {
     await tapDialog('返回首页？', '返回首页');
@@ -305,7 +456,9 @@ async function game(order = 3) {
   await home();
   await tap(`${order} 阶`);
   await tap(/开始游戏/);
-  return waitFor(`${order} × ${order} game ready`, s => isGame(s, order) && idleControls(s));
+  const ready = await waitFor(`${order} × ${order} game ready`, s => isGame(s, order) && idleControls(s));
+  assertTouchOnly(ready);
+  return ready;
 }
 async function settings() {
   await home();
@@ -313,6 +466,7 @@ async function settings() {
   return waitFor('settings default-order controls', s => has(s, '默认阶数') && enabledButton(s, '4 阶'));
 }
 async function runCase(name, fn) {
+  if (SELECTED_CASES && !SELECTED_CASES.has(name)) return;
   currentCase = name;
   const started = Date.now();
   try {
@@ -333,6 +487,9 @@ async function runCase(name, fn) {
 }
 
 async function main() {
+  // Fail before any device command when the source API is missing or incompatible.
+  await loadGeometry();
+  summary.selectedCases = SELECTED_CASES ? [...SELECTED_CASES] : CASE_NAMES;
   await restart();
   check(isHome(latest), 'starts on home');
   await capture('home-initial');
@@ -343,6 +500,14 @@ async function main() {
       check(isGame(state, order), `start game displays ${order} × ${order}`);
       check(moves(state) === 0 && timer(state) === '00:00.00', 'new game has zero moves and time');
       await capture(`game-${order}`);
+      await swipeFace('U', order, `${order}×${order} surface U`);
+      const turned = await waitFor(`${order}×${order} surface turn counts exactly 1`, s => moves(s) === 1 && idleControls(s));
+      check(timer(turned) === '00:00.00' && enabledButton(turned, /撤销/), `${order}×${order} surface U is counted and undoable without timer`);
+      await capture(`game-${order}-surface-U`);
+      await tap(/撤销/);
+      const undone = await waitFor(`${order}×${order} undo restores zero`, s => moves(s) === 0 && idleControls(s));
+      check(timer(undone) === '00:00.00' && !enabledButton(undone, /撤销/), `${order}×${order} undo consumes the only move`);
+      await capture(`game-${order}-undo`);
       await home();
     });
   }
@@ -358,30 +523,23 @@ async function main() {
       let state = await waitFor(`tutorial step ${index + 1}`, s => lesson(s)?.step === index + 1 && idleControls(s));
       const before = lesson(state);
       check(before.total === 5 && before.face === expected, `tutorial ${index + 1}/5 expects ${expected}`, { observed: before });
-      const active = button(state, faceQuery(expected));
-      const wrongFace = expected === 'U' ? 'B' : 'U';
-      const wrong = button(state, faceQuery(wrongFace));
-      check(Boolean(active && wrong && active.a.backgroundColor && active.a.backgroundColor !== wrong.a.backgroundColor),
-        `tutorial ${index + 1}/5 expected button is highlighted`);
+      assertTouchOnly(state);
+      // Deliberately use a different layer/axis, not a removed button or an
+      // arbitrary swipe that might miss the cube and merely rotate the camera.
+      const wrongFace = expected[0] === 'U' ? 'R' : 'U';
       const beforeMoves = moves(state);
-      await tap(faceQuery(wrongFace), `wrong tutorial face ${wrongFace}`);
-      // Observe repeatedly for longer than the slowest 440ms single move. Do not
-      // accept a single stale dump as proof that the wrong action was ignored.
-      const observationDeadline = Date.now() + 1200;
-      let samples = 0;
-      do {
-        state = dump();
-        const after = lesson(state);
-        if (after?.step !== before.step || after?.face !== before.face || moves(state) !== beforeMoves || !idleControls(state)) {
-          throw new Error(`ASSERTION FAILED: wrong ${wrongFace} advanced/changed tutorial ${before.step}: ${JSON.stringify({ after, moves: moves(state) })}`);
-        }
-        samples++;
-        if (Date.now() < observationDeadline) await delay(160);
-      } while (Date.now() < observationDeadline || samples < 2);
-      check(true, `wrong button does not advance tutorial step ${index + 1}`, { samples });
-      await tap(faceQuery(expected), `tutorial face ${expected}`);
+      check(beforeMoves === 0, `tutorial ${index + 1}/5 has no counted moves`);
+      await swipeFace(wrongFace, 3, `wrong tutorial gesture ${wrongFace}, expected ${expected}`);
+      await assertUnchanged(`wrong ${wrongFace} gesture does not advance tutorial step ${index + 1}`, s => {
+        const after = lesson(s);
+        return after?.step === before.step && after?.total === 5 && after?.face === expected &&
+          moves(s) === beforeMoves && idleControls(s);
+      });
+      await capture(`tutorial-step-${index + 1}-wrong-${wrongFace}-ignored`);
+      await swipeFace(expected, 3, `tutorial target-layer arrow ${expected}`);
       if (index < sequence.length - 1) {
-        await waitFor(`tutorial advances to ${index + 2}/5`, s => lesson(s)?.step === index + 2 && idleControls(s));
+        await waitFor(`tutorial advances exactly to ${index + 2}/5 ${sequence[index + 1]}`, s =>
+          lesson(s)?.step === index + 2 && lesson(s)?.total === 5 && lesson(s)?.face === sequence[index + 1] && moves(s) === 0 && idleControls(s));
         await capture(`tutorial-step-${index + 2}`);
       } else {
         state = await waitFor('tutorial completed', s => has(s, /教程完成/) && idleControls(s));
@@ -394,7 +552,7 @@ async function main() {
 
   await runCase('free-move-undo', async () => {
     await game(3);
-    await tap(faceQuery('U'));
+    await swipeFace('U');
     let state = await waitFor('free U increments count to 1', s => moves(s) === 1 && idleControls(s));
     check(timer(state) === '00:00.00', 'free U counts 1 without starting timer');
     await capture('free-U-count-1');
@@ -406,20 +564,29 @@ async function main() {
 
   await runCase('surface-swipe', async () => {
     await game(3);
-    await tap('正视角');
     await capture('surface-before');
-    const state = dump();
-    const canvas = state.nodes.find(n => n.type === 'Canvas' && usable(n, state));
-    check(Boolean(canvas), 'Canvas has visible dump bounds');
-    const before = moves(state);
-    check(before === 0, 'swipe starts from zero moves');
-    // Home reference: green front face is left of cube center, below the white
-    // top. These are Canvas-local ratios, NEVER coordinates of the thumbnail.
-    // Use a horizontal tangent gesture; do not assert which layer/direction wins.
-    swipe(canvas, [0.38, 0.56], [0.60, 0.59], 'green front sticker horizontal swipe');
-    const after = await waitFor('surface swipe increases move count', s => moves(s) !== null && moves(s) > before && idleControls(s), 10000);
-    check(moves(after) > before, 'surface swipe increments moves', { before, after: moves(after), direction: 'observed only; not asserted' });
+    await swipeFace('U');
+    const after = await waitFor('surface U counts exactly one move', s => moves(s) === 1 && idleControls(s));
+    check(moves(after) === 1, 'renderer-validated surface U increments exactly once');
     await capture('surface-after');
+    await tap(/撤销/);
+    await waitFor('surface U undo restores zero', s => moves(s) === 0 && idleControls(s));
+    const { canvas, geometry } = await gestureGeometry(3);
+    const start = [0.06, 0.06];
+    const end = [0.20, 0.06];
+    check(Array.from({ length: 21 }, (_, i) => i / 20).every(t =>
+      !geometry.renderer.hitTest((start[0] + (end[0] - start[0]) * t) * geometry.width,
+        start[1] * geometry.height)), 'background drag path misses all cube surfaces');
+    swipe(canvas, start, end, 'background-only camera orbit');
+    await assertUnchanged('background orbit does not add moves or start timer', s =>
+      moves(s) === 0 && timer(s) === '00:00.00' && !enabledButton(s, /撤销/) && idleControls(s));
+    await capture('background-orbit-count-0');
+    // Return to a known view and prove an orbit did not break surface interaction.
+    await swipeFace('U');
+    await waitFor('surface U still works after orbit/view reset', s => moves(s) === 1 && idleControls(s));
+    await tap(/撤销/);
+    await waitFor('post-orbit undo restores zero', s => moves(s) === 0 && idleControls(s));
+    await capture('surface-after-orbit-undo');
   });
 
   await runCase('scramble-timer-hint-back', async () => {
@@ -432,7 +599,7 @@ async function main() {
     state = await waitFor('ready stays zero until first turn', s =>
       has(s, '准备开始') && timer(s) === '00:00.00' && moves(s) === 0, 6000, 2);
     check(timer(state) === '00:00.00', 'ready timer remains stopped across dumps');
-    await tap(faceQuery('R'));
+    await swipeFace('R', 3, 'first surface R after scramble');
     state = await waitFor('first R starts timer and counts exactly 1', s =>
       has(s, '计时挑战') && moves(s) === 1 && centiseconds(s) > 0 && idleControls(s));
     const firstTime = centiseconds(state);
@@ -444,7 +611,7 @@ async function main() {
       has(s, /历史回退参考/) && has(s, '辅助练习') && has(s, /不计入成绩/));
     check(has(state, '辅助练习'), 'history hint changes phase to 辅助练习 and excludes score');
     await capture('history-hint-assisted');
-    await tap(/^(‹|返回首页)$/);
+    await tapBack();
     state = await waitFor('leave confirmation dialog', leaveDialogReady);
     check(descendants(alertDialog(state, '返回首页？')).some(n => n.type === 'Text' &&
       n.text === '本局进度不会保存，已完成的成绩不受影响。' && usable(n, state)), 'return dialog preserves completed records');
@@ -506,6 +673,11 @@ async function main() {
     check(isGame(state, 4), 'aa force-stop/start preserves default 4');
     await capture('persisted-game-4');
   });
+}
+
+if (process.argv.includes('--check-gestures')) {
+  await checkGesturesOffline();
+  process.exit(0);
 }
 
 mkdirSync(OUT, { recursive: true });

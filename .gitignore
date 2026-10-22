@@ -37,3 +37,21 @@ yarn.lock
 Thumbs.db
 *.swp
 *.swo
+
+# Local configuration, signing material, and generated verification artifacts
+/.local/
+/dist/
+/verification/**/*.png
+/verification/**/*.json
+/verification/**/*.txt
+*.hap
+*.app
+*.hsp
+*.cer
+*.p7b
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+!.env.example

@@ -48,6 +48,7 @@ struct Index {
   private queue: CubeMove[] = [];
   private queueKind: string = '';
   private lesson: CubeMove[] = [];
+  private hintMove: CubeMove | null = null;
   private startX: number = 0;
   private startY: number = 0;
   private lastX: number = 0;
@@ -55,6 +56,17 @@ struct Index {
   private orbiting: boolean = false;
   private touching: boolean = false;
   private pointerCount: number = 0;
+  private blockedTouch: boolean = false;
+  private orbitDragging: boolean = false;
+  private gestureVersion: number = 0;
+  private downVersion: number = 0;
+  private downSession: number = 0;
+  private downModel: CubeModel | null = null;
+  private downWidth: number = 0;
+  private downHeight: number = 0;
+  private downYaw: number = 0;
+  private downPitch: number = 0;
+  private downPage: string = '';
   private readonly orders: number[] = [2, 3, 4, 5];
   private readonly firstFaces: string[] = ['U', "U'", 'D', "D'", 'L', "L'"];
   private readonly secondFaces: string[] = ['R', "R'", 'F', "F'", 'B', "B'"];
@@ -65,6 +77,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.invalidateGesture();
     this.stopTimers();
     this.feedback.release();
   }
@@ -87,6 +100,7 @@ struct Index {
       this.sound = this.store.settings.sound;
       this.haptics = this.store.settings.haptics;
       this.records = this.store.records.slice();
+      this.invalidateGesture(true);
       this.model.reset(this.order);
       this.draw();
     } catch {
@@ -123,7 +137,7 @@ struct Index {
         this.elapsed = this.timeBase;
       }
       this.stopTimers();
-      this.touching = false;
+      this.invalidateGesture();
     } else {
       if (this.phase === 'playing') { this.startedAt = Date.now(); }
       this.animationAt = Date.now();
@@ -136,6 +150,14 @@ struct Index {
     if (this.canvasReady) {
       this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
         this.model, this.yaw, this.pitch, this.activeMove, progress);
+      if (!this.busy && this.page === 'game') {
+        const target = this.phase === 'tutorial' && this.lessonIndex < this.lesson.length ?
+          this.lesson[this.lessonIndex] : this.hintMove;
+        if (target !== null) {
+          const guide = this.renderer.getSwipeGuide(target);
+          if (guide !== null) { this.renderer.drawGuide(this.context2d, guide); }
+        }
+      }
     }
   }
 
@@ -169,7 +191,7 @@ struct Index {
       this.feedback.play(this.sound, this.haptics);
       if (this.lessonIndex >= this.lesson.length) {
         this.phase = 'idle';
-        this.hint = '教程完成！你已经学会按记号转动魔方。';
+        this.hint = '教程完成！你已经学会滑动转层，试试打乱挑战吧。';
       } else {
         this.updateLessonHint();
       }
@@ -182,6 +204,7 @@ struct Index {
 
   private animate(moves: CubeMove[], kind: string): void {
     if (moves.length === 0 || this.busy) { return; }
+    this.invalidateGesture(true);
     this.queue = moves.slice();
     this.queueKind = kind;
     this.activeMove = this.queue.shift() as CubeMove;
@@ -190,6 +213,7 @@ struct Index {
   }
 
   private resetSession(): void {
+    this.invalidateGesture();
     this.sessionId++;
     this.queue = [];
     this.activeMove = null;
@@ -203,10 +227,10 @@ struct Index {
     this.moves = 0;
     this.hint = '';
     this.assisted = false;
+    this.hintMove = null;
     this.lesson = [];
     this.lessonIndex = 0;
     this.lessonTotal = 0;
-    this.touching = false;
     this.draw();
   }
 
@@ -297,7 +321,7 @@ struct Index {
     if (this.phase === 'tutorial') {
       if (this.lessonIndex < this.lesson.length && this.sameMove(move, this.lesson[this.lessonIndex])) {
         this.animate([move], 'lessonStep');
-      } else { this.toast('请按高亮按钮，完成当前教程步骤。'); }
+      } else { this.toast('请从箭头圆点沿箭头滑动，完成当前教程步骤。'); }
       return;
     }
     if (this.phase === 'solved') {
@@ -311,6 +335,8 @@ struct Index {
       this.startedAt = Date.now();
       this.hint = '';
     }
+    if (this.hintMove !== null) { this.hint = ''; }
+    this.hintMove = null;
     this.animate([move], 'user');
   }
 
@@ -318,8 +344,10 @@ struct Index {
     if (this.busy || !this.foreground || this.phase === 'tutorial' || this.phase === 'solved') { return; }
     const move = this.model.undo();
     if (move !== null) {
+      this.invalidateGesture(true);
       this.moves = this.model.moveCount;
       this.hint = '';
+      this.hintMove = null;
       this.draw();
       if (this.phase === 'playing' && this.model.isSolved()) { this.finishSolve(); }
     } else { this.toast('还没有可以撤销的操作。'); }
@@ -330,7 +358,9 @@ struct Index {
     const solution = this.model.getSolution();
     if (solution.length > 0) {
       this.assisted = true;
-      this.hint = `历史回退参考：${this.moveLabel(solution[0])}。这是逆向回放，不是最优求解；本局不计入成绩。`;
+      this.hintMove = solution[0];
+      this.hint = `历史回退参考：${this.moveLabel(solution[0])}，沿箭头滑动；看不到箭头时请转动视角。这是逆向回放，不是最优求解；本局不计入成绩。`;
+      this.draw();
     }
   }
 
@@ -358,12 +388,7 @@ struct Index {
   }
 
   private updateLessonHint(): void {
-    this.hint = `第 ${this.lessonIndex + 1} / ${this.lessonTotal} 步：点击 ${this.moveLabel(this.lesson[this.lessonIndex])}。字母表示该面顺时针转 90°，带 ′ 表示逆时针。`;
-  }
-
-  private isLessonFace(face: string): boolean {
-    return this.phase === 'tutorial' && this.lessonIndex < this.lesson.length &&
-      this.sameMove(this.faceMove(face), this.lesson[this.lessonIndex]);
+    this.hint = `第 ${this.lessonIndex + 1} / ${this.lessonTotal} 步：沿箭头滑动完成 ${this.moveLabel(this.lesson[this.lessonIndex])}。从圆点滑向箭头，松手转层；看不到箭头时，拖动空白或双指转动视角。`;
   }
 
   private finishSolve(): void {
@@ -390,37 +415,134 @@ struct Index {
     });
   }
 
-  private touch(event: TouchEvent): void {
-    if (event.type === TouchType.Cancel) {
-      this.touching = false;
-      this.pointerCount = 0;
+  private invalidateGesture(layerOnly: boolean = false): void {
+    this.gestureVersion++;
+    // Model animations invalidate a pending layer, not an orbit on every frame.
+    if (layerOnly) {
+      if (this.touching && !this.orbiting) { this.blockedTouch = true; }
       return;
     }
+    this.touching = false;
+    this.pointerCount = 0;
+    this.orbiting = false;
+    this.blockedTouch = false;
+    this.orbitDragging = false;
+    this.downModel = null;
+  }
+
+  private layerGestureCurrent(): boolean {
+    return this.downVersion === this.gestureVersion && this.downSession === this.sessionId &&
+      this.downModel === this.model && this.downPage === this.page &&
+      this.downWidth === this.canvasWidth && this.downHeight === this.canvasHeight &&
+      this.downYaw === this.yaw && this.downPitch === this.pitch;
+  }
+
+  private setTouchOrigin(points: TouchObject[]): void {
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < points.length; i++) {
+      x += points[i].x;
+      y += points[i].y;
+    }
+    this.startX = this.lastX = x / points.length;
+    this.startY = this.lastY = y / points.length;
+    this.pointerCount = points.length;
+    this.orbitDragging = false;
+  }
+
+  private moveOrbit(x: number, y: number): void {
+    const dx = x - this.startX;
+    const dy = y - this.startY;
+    if (!this.orbitDragging && Math.sqrt(dx * dx + dy * dy) <= 8) { return; }
+    this.orbitDragging = true;
+    // worldToCamera applies Y(-yaw), then X(-pitch): subtract screen deltas.
+    const moved = x !== this.lastX || y !== this.lastY;
+    this.yaw -= (x - this.lastX) * 0.009;
+    this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - (y - this.lastY) * 0.009));
+    this.lastX = x;
+    this.lastY = y;
+    if (moved && !this.busy) { this.draw(); }
+  }
+
+  private judgeScrollGesture(current: GestureRecognizer): GestureJudgeResult {
+    // Reject the Scroll's own Pan before acceptance can Cancel Canvas.onTouch.
+    return this.touching && current.isBuiltIn() && current.getType() === GestureControl.GestureType.PAN_GESTURE ?
+      GestureJudgeResult.REJECT : GestureJudgeResult.CONTINUE;
+  }
+
+  private touch(event: TouchEvent): void {
+    if (event.type === TouchType.Cancel || !this.foreground) {
+      this.invalidateGesture();
+      return;
+    }
+    // Cancel/background never allow a Move or Up to manufacture a new gesture.
+    if (!this.touching && event.type !== TouchType.Down) { return; }
     if (event.type === TouchType.Up) {
       const remaining = event.touches.filter((point: TouchObject) =>
         !event.changedTouches.some((changed: TouchObject) => changed.id === point.id));
       if (remaining.length > 0) {
         this.orbiting = true;
-        this.pointerCount = remaining.length;
-        this.lastX = remaining[0].x;
-        this.lastY = remaining[0].y;
+        this.blockedTouch = false;
+        this.setTouchOrigin(remaining);
         return;
       }
-      if (this.touching && !this.orbiting && !this.busy && event.changedTouches.length > 0) {
-        const point = event.changedTouches[0];
-        const dx = point.x - this.startX;
-        const dy = point.y - this.startY;
-        if (Math.sqrt(dx * dx + dy * dy) >= 24) {
-          const move = this.renderer.pickMove(this.startX, this.startY, point.x, point.y,
-            this.model, this.yaw, this.pitch);
-          if (move !== null) { this.requestMove(move); }
+      if (event.changedTouches.length > 0) {
+        let x = 0;
+        let y = 0;
+        for (let i = 0; i < event.changedTouches.length; i++) {
+          x += event.changedTouches[i].x;
+          y += event.changedTouches[i].y;
+        }
+        x /= event.changedTouches.length;
+        y /= event.changedTouches.length;
+        if (this.orbiting) {
+          this.moveOrbit(x, y);
+        } else if (!this.blockedTouch && !this.busy && this.layerGestureCurrent()) {
+          const dx = x - this.startX;
+          const dy = y - this.startY;
+          if (Math.sqrt(dx * dx + dy * dy) >= 24) {
+            const move = this.renderer.pickMove(this.startX, this.startY, x, y,
+              this.model, this.yaw, this.pitch);
+            // Release before dispatch, even if requestMove synchronously starts animation.
+            this.invalidateGesture();
+            if (move !== null) { this.requestMove(move); }
+            return;
+          }
         }
       }
-      this.touching = false;
-      this.pointerCount = 0;
+      this.invalidateGesture();
       return;
     }
     if (event.touches.length === 0) { return; }
+    if (event.type === TouchType.Down) {
+      if (!this.touching) {
+        this.setTouchOrigin(event.touches);
+        this.orbiting = event.touches.length > 1 || this.page === 'home' ||
+          !this.renderer.hitTest(this.startX, this.startY);
+        this.blockedTouch = !this.orbiting && this.busy;
+        this.downVersion = this.gestureVersion;
+        this.downSession = this.sessionId;
+        this.downModel = this.model;
+        this.downPage = this.page;
+        this.downWidth = this.canvasWidth;
+        this.downHeight = this.canvasHeight;
+        this.downYaw = this.yaw;
+        this.downPitch = this.pitch;
+      } else if (event.touches.length > 1) {
+        this.orbiting = true;
+        this.blockedTouch = false;
+        this.setTouchOrigin(event.touches);
+      }
+      this.touching = true;
+      return;
+    }
+    if (event.type !== TouchType.Move) { return; }
+    if (this.pointerCount !== event.touches.length) {
+      this.orbiting = true;
+      this.blockedTouch = false;
+      this.setTouchOrigin(event.touches);
+      return;
+    }
     let x = 0;
     let y = 0;
     for (let i = 0; i < event.touches.length; i++) {
@@ -429,33 +551,13 @@ struct Index {
     }
     x /= event.touches.length;
     y /= event.touches.length;
-    if (event.type === TouchType.Down || !this.touching) {
-      if (!this.touching) {
-        this.startX = x;
-        this.startY = y;
-        this.orbiting = this.page === 'home' || !this.renderer.hitTest(x, y) || this.busy;
-      }
-      if (event.touches.length > 1) { this.orbiting = true; }
-      this.touching = true;
-      this.pointerCount = event.touches.length;
-      this.lastX = x;
-      this.lastY = y;
-      return;
-    }
-    if (this.pointerCount !== event.touches.length) {
-      this.orbiting = true;
-      this.pointerCount = event.touches.length;
-      this.lastX = x;
-      this.lastY = y;
-      return;
-    }
     if (this.orbiting) {
-      this.yaw += (x - this.lastX) * 0.009;
-      this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch + (y - this.lastY) * 0.009));
-      if (!this.busy) { this.draw(); }
+      this.moveOrbit(x, y);
+    } else {
+      if (this.busy || !this.layerGestureCurrent()) { this.blockedTouch = true; }
+      this.lastX = x;
+      this.lastY = y;
     }
-    this.lastX = x;
-    this.lastY = y;
   }
 
   private saveSettings(): void {
@@ -522,12 +624,13 @@ struct Index {
       .height('100%')
       .onReady(() => { this.canvasReady = true; this.draw(); })
       .onAreaChange((_old: Area, area: Area) => {
+        this.invalidateGesture();
         this.canvasWidth = Number(area.width);
         this.canvasHeight = Number(area.height);
         this.draw();
       })
       .onTouch((event: TouchEvent) => this.touch(event))
-      .accessibilityText(`${this.order} 阶魔方，滑动表面转层，拖动背景旋转视角。也可以使用下方转面按钮。`)
+      .accessibilityText(`${this.order} 阶魔方，沿表面行或列滑动，松手转动一层。拖动背景或双指拖动旋转视角。`)
   }
 
   private orderDescription(value: number): string {
@@ -598,14 +701,10 @@ struct Index {
           Blank()
           Blank().width(88)
         }.width('100%').height(44)
-        Column({ space: 6 }) {
-          Text('转动之间，\n找到你的节奏。').fontSize(33).lineHeight(43).fontWeight(FontWeight.Bold)
-            .fontColor(CubeTheme.ink).letterSpacing(-0.5)
-          Row({ space: 7 }) {
-            Circle().width(5).height(5).fill(CubeTheme.green)
-            Text('随时开始一场小小的脑力旅行').fontSize(12).fontColor(CubeTheme.secondary)
-          }
-        }.width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
+        Row({ space: 7 }) {
+          Circle().width(5).height(5).fill(CubeTheme.green)
+          Text('随时开始一场小小的脑力旅行').fontSize(12).fontColor(CubeTheme.secondary)
+        }.width('100%').margin({ top: 4 })
         Column({ space: 0 }) {
           Row() {
             Text(`${this.order} × ${this.order} / ${this.orderDescription(this.order)}`)
@@ -649,7 +748,7 @@ struct Index {
               Text('↗').fontSize(17).fontColor(CubeTheme.secondary)
             }.width('100%').padding(14)
           }.layoutWeight(1).height(52).borderRadius(16).backgroundColor(CubeTheme.surface)
-            .accessibilityText('成绩统计').onClick(() => { this.canvasReady = false; this.page = 'stats'; })
+            .accessibilityText('成绩统计').onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'stats'; })
           Button({ type: ButtonType.Normal }) {
             Row({ space: 10 }) {
               SymbolGlyph($r('sys.symbol.gearshape')).fontSize(19).fontColor([CubeTheme.green])
@@ -658,43 +757,37 @@ struct Index {
               Text('↗').fontSize(17).fontColor(CubeTheme.secondary)
             }.width('100%').padding(14)
           }.layoutWeight(1).height(52).borderRadius(16).backgroundColor(CubeTheme.surface)
-            .accessibilityText('偏好设置').onClick(() => { this.canvasReady = false; this.page = 'settings'; })
+            .accessibilityText('偏好设置').onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'settings'; })
         }.width('100%')
         Text(this.storageWarning.length > 0 ? this.storageWarning : '纯粹玩，安心转  ·  无广告 / 离线可玩')
           .fontSize(10).fontColor(CubeTheme.secondary).textAlign(TextAlign.Center)
       }.width('100%').constraintSize({ maxWidth: 520 }).padding({ left: 22, right: 22, top: 12, bottom: 22 })
     }.width('100%').height('100%').scrollBar(BarState.Off)
+      .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer) =>
+        this.judgeScrollGesture(current))
   }
 
   @Builder
-  private backButton() {
-    Button('‹', { type: ButtonType.Circle }).width(44).height(44).fontSize(30)
-      .backgroundColor(CubeTheme.surface).fontColor(CubeTheme.ink)
-      .border({ width: 1, color: CubeTheme.line })
+  private backButton(compact: boolean = false) {
+    Button({ type: ButtonType.Circle }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Circle().width(compact ? 36 : 44).height(compact ? 36 : 44)
+          .fill(CubeTheme.surface).stroke(CubeTheme.line).strokeWidth(1)
+        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(compact ? 24 : 20).fontColor([CubeTheme.ink])
+      }.width(44).height(44)
+    }.width(44).height(44).padding(0)
+      .backgroundColor(Color.Transparent)
+      .id('back-button')
       .accessibilityText('返回首页').onClick(() => this.goHome())
   }
 
   @Builder
-  private header(title: string) {
+  private header(title: string, compactBack: boolean = false) {
     Row({ space: 12 }) {
-      this.backButton()
+      this.backButton(compactBack)
       Text(title).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).layoutWeight(1)
       Blank().width(88)
     }.width('100%').height(48)
-  }
-
-  @Builder
-  private faceRow(faces: string[]) {
-    Row({ space: 6 }) {
-      ForEach(faces, (face: string) => {
-        Button(face, { type: ButtonType.Normal }).layoutWeight(1).height(44).borderRadius(12)
-          .backgroundColor(this.isLessonFace(face) ? CubeTheme.accent : CubeTheme.soft)
-          .border({ width: 1, color: this.isLessonFace(face) ? CubeTheme.green : CubeTheme.line, radius: 12 })
-          .padding({ left: 0, right: 0 }).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Medium)
-          .enabled(!this.busy).onClick(() => this.requestMove(this.faceMove(face)))
-          .accessibilityText(`${face} 面转动`)
-      })
-    }.width('100%')
   }
 
   @Builder
@@ -726,25 +819,18 @@ struct Index {
           .backgroundColor(CubeTheme.ink).borderRadius(24)
         Stack() {
           this.cubeStage()
-        }.width('100%').height(Math.max(170, Math.min(340, this.viewportHeight - (this.hint.length > 0 ? 620 : 560))))
+        }.width('100%').height(Math.max(240, Math.min(480, this.viewportHeight - (this.hint.length > 0 ? 450 : 370))))
         Row({ space: 6 }) {
           Text('滑动转层 · 空白或双指转视角').fontSize(10).fontColor(CubeTheme.secondary).layoutWeight(1)
           Button('正视角', { type: ButtonType.Normal }).height(44).fontSize(11).borderRadius(12)
             .backgroundColor(CubeTheme.surface).fontColor(CubeTheme.green)
-            .onClick(() => { this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
+            .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
         }.width('100%')
         if (this.hint.length > 0) {
           Text(this.hint).fontSize(12).lineHeight(19).fontColor(CubeTheme.green)
             .width('100%').padding(12).backgroundColor(CubeTheme.mint).borderRadius(14)
         }
         Column({ space: 10 }) {
-          Row() {
-            Text('转面控制').fontSize(12).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-            Blank()
-            Text('带 ′ 为逆时针').fontSize(10).fontColor(CubeTheme.secondary)
-          }.width('100%')
-          this.faceRow(this.firstFaces)
-          this.faceRow(this.secondFaces)
           Row({ space: 8 }) {
             Button('打乱', { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
               .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
@@ -768,6 +854,8 @@ struct Index {
         }.width('100%').padding(14).backgroundColor(CubeTheme.surface).borderRadius(24)
       }.width('100%').constraintSize({ maxWidth: 600 }).padding({ left: 18, right: 18, top: 10, bottom: 16 })
     }.width('100%').height('100%').scrollBar(BarState.Off)
+      .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer) =>
+        this.judgeScrollGesture(current))
       .onScrollFrameBegin((offset: number, state: ScrollState) => {
         // Keep a cube gesture from also scrolling its surrounding page.
         return { offsetRemain: this.touching ? 0 : offset };
@@ -853,7 +941,7 @@ struct Index {
   @Builder
   private settingsPage() {
     Column({ space: 22 }) {
-      this.header('偏好设置')
+      this.header('偏好设置', true)
       Scroll() {
         Column({ space: 18 }) {
           this.sectionTitle('MAKE IT YOURS', '你的魔方，你的节奏。')
@@ -926,10 +1014,6 @@ struct Index {
             }.width('100%')
             Text('轻量三维魔方，随时开启。所有计算与成绩都留在本机，无广告，也无需联网。')
               .fontSize(12).fontColor(CubeTheme.secondary).lineHeight(21).width('100%')
-            Divider().color('#CFDDCE')
-            Text('转面小贴士').fontSize(12).fontWeight(FontWeight.Bold).fontColor(CubeTheme.green).width('100%')
-            Text('U 上 · D 下 · L 左 · R 右 · F 前 · B 后\n带 ′ 表示逆时针；方向以正对该面为准，与屏幕视角无关。')
-              .fontSize(11).fontColor(CubeTheme.secondary).lineHeight(20).width('100%')
           }.width('100%').padding(20).backgroundColor(CubeTheme.mint).borderRadius(24)
         }.width('100%').padding({ bottom: 24 })
       }.width('100%').layoutWeight(1).scrollBar(BarState.Off)

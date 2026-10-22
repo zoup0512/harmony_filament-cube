@@ -40,7 +40,11 @@ if not exist .git (
     echo [1/6] 本地Git仓库已存在，跳过初始化
 )
 
-REM 2. 生成鸿蒙专属标准.gitignore
+REM 2. 仅在不存在时生成.gitignore，保留项目维护的排除规则
+if exist .gitignore (
+    echo [2/6] 保留现有 .gitignore 文件
+    goto gitignore_ready
+)
 echo [2/6] 生成HarmonyOS工程专属 .gitignore 文件...
 (echo # HarmonyOS .gitignore) > .gitignore
 (echo .idea/) >> .gitignore
@@ -81,7 +85,23 @@ echo [2/6] 生成HarmonyOS工程专属 .gitignore 文件...
 (echo Thumbs.db) >> .gitignore
 (echo *.swp) >> .gitignore
 (echo *.swo) >> .gitignore
+(echo /.local/) >> .gitignore
+(echo /dist/) >> .gitignore
+(echo /verification/**/*.png) >> .gitignore
+(echo /verification/**/*.json) >> .gitignore
+(echo /verification/**/*.txt) >> .gitignore
+(echo *.hap) >> .gitignore
+(echo *.app) >> .gitignore
+(echo *.hsp) >> .gitignore
+(echo *.cer) >> .gitignore
+(echo *.p7b) >> .gitignore
+(echo *.pfx) >> .gitignore
+(echo *.pem) >> .gitignore
+(echo *.key) >> .gitignore
+(echo .env) >> .gitignore
+(echo .env.*) >> .gitignore
 
+:gitignore_ready
 REM 3. 全局Git用户配置补全
 git config --get user.name >nul 2>&1
 if errorlevel 1 (

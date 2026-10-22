@@ -23,6 +23,38 @@ class CubePoint2 {
   }
 }
 
+/** Touch and Canvas logical coordinates; redraw/recompute after any scene change. */
+export class CubeSwipeGuide {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+
+  constructor(startX: number, startY: number, endX: number, endY: number) {
+    this.startX = startX;
+    this.startY = startY;
+    this.endX = endX;
+    this.endY = endY;
+  }
+}
+
+class CubeSurfaceHit {
+  point: CubeVector3;
+  normal: CubeVector3;
+  x: number;
+  y: number;
+  z: number;
+
+  constructor(point: CubeVector3, normal: CubeVector3, order: number) {
+    this.point = point;
+    this.normal = normal;
+    // Half-open cells assign an exact seam to the higher layer; outer edges clamp.
+    this.x = Math.max(0, Math.min(order - 1, Math.floor((point.x + 1) * order / 2)));
+    this.y = Math.max(0, Math.min(order - 1, Math.floor((point.y + 1) * order / 2)));
+    this.z = Math.max(0, Math.min(order - 1, Math.floor((point.z + 1) * order / 2)));
+  }
+}
+
 class CubeFaceBasis {
   normal: CubeVector3;
   u: CubeVector3;
@@ -91,6 +123,8 @@ export class CubeRenderer {
   private pitchCos: number = 1;
   private pitchSin: number = 0;
   private animating: boolean = false;
+  private cachedCubies: Cubelet[] = [];
+  private cachedCoordinates: number[] = [];
 
   draw(ctx: CanvasRenderingContext2D, width: number, height: number, model: CubeModel,
     yaw: number, pitch: number, move: CubeMove | null = null, progress: number = 0): void {
@@ -120,6 +154,13 @@ export class CubeRenderer {
     this.lastModel = model;
     this.lastOrder = model.order;
     this.animating = move !== null;
+    this.cachedCubies = [];
+    this.cachedCoordinates = [];
+    for (let i: number = 0; i < model.cubies.length; i++) {
+      let cubie: Cubelet = model.cubies[i];
+      this.cachedCubies.push(cubie);
+      this.cachedCoordinates.push(cubie.x, cubie.y, cubie.z);
+    }
 
     let amount: number = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
     let angle: number = move === null ? 0 : move.turns * Math.PI * 0.5 * amount;
@@ -179,21 +220,22 @@ export class CubeRenderer {
   }
 
   hitTest(x: number, y: number): boolean {
-    return this.faceAt(x, y) !== null;
+    // Busy touches on the cube must still enter the UI's BLOCKED state, not
+    // accidentally become background-orbit gestures. Only pick/guide need rest.
+    return this.cacheIsCurrent(true) && this.boxHit(x, y) !== null;
   }
 
   pickMove(startX: number, startY: number, endX: number, endY: number,
     model: CubeModel, yaw: number, pitch: number): CubeMove | null {
     // Never infer against stale camera/model geometry or an in-flight layer.
-    if (this.animating || this.lastModel !== model || this.lastOrder !== model.order ||
+    if (!this.cacheIsCurrent() || this.lastModel !== model || this.lastOrder !== model.order ||
       !Number.isFinite(yaw) || !Number.isFinite(pitch) ||
       Math.abs(yaw - this.lastYaw) > 0.000001 || Math.abs(pitch - this.lastPitch) > 0.000001 ||
       !Number.isFinite(endX) || !Number.isFinite(endY)) {
       return null;
     }
-    let face: CubeVisibleFace | null = this.faceAt(startX, startY);
-    if (face === null || model.cubies.indexOf(face.cubie) < 0 ||
-      face.cubie.x !== face.x || face.cubie.y !== face.y || face.cubie.z !== face.z) {
+    let hit: CubeSurfaceHit | null = this.boxHit(startX, startY);
+    if (hit === null) {
       return null;
     }
     let dx: number = endX - startX;
@@ -202,31 +244,24 @@ export class CubeRenderer {
     if (dragLength < Math.max(8, Math.min(this.width, this.height) * 0.016)) {
       return null;
     }
-    let point: CubeVector3 | null = this.surfacePoint(startX, startY, face);
-    if (point === null) {
-      return null;
-    }
     let axes: string[] = ['x', 'y', 'z'];
     let bestAxis: string = '';
-    let bestScore: number = 0.60;
+    let bestScore: number = 0;
+    let secondScore: number = 0;
     let bestTurns: number = 1;
-    let epsilon: number = 0.015;
-    let cosine: number = Math.cos(epsilon);
-    let sine: number = Math.sin(epsilon);
     for (let i: number = 0; i < axes.length; i++) {
       let axis: string = axes[i];
       // A surface swipe chooses one of its two tangent axes, not the normal axis.
-      let normalComponent: number = axis === 'x' ? face.normal.x :
-        (axis === 'y' ? face.normal.y : face.normal.z);
+      let normalComponent: number = axis === 'x' ? hit.normal.x :
+        (axis === 'y' ? hit.normal.y : hit.normal.z);
       if (Math.abs(normalComponent) > 0.5) {
         continue;
       }
-      // Central difference of the actual perspective projection. This preserves
-      // sign at every camera angle, unlike a screen-axis / face-name lookup table.
-      let positive: CubePoint2 = this.project(this.toCamera(this.rotate(point, axis, cosine, sine)));
-      let negative: CubePoint2 = this.project(this.toCamera(this.rotate(point, axis, cosine, -sine)));
-      let tx: number = positive.x - negative.x;
-      let ty: number = positive.y - negative.y;
+      // Android row/column convention: axis cross face normal, not axis cross
+      // hit position. Positive alignment is a positive right-handed quarter turn.
+      let tangent: CubePoint2 = this.swipeTangent(hit.normal, axis);
+      let tx: number = tangent.x;
+      let ty: number = tangent.y;
       let tangentLength: number = Math.sqrt(tx * tx + ty * ty);
       if (tangentLength < 0.0001) {
         continue;
@@ -234,22 +269,172 @@ export class CubeRenderer {
       let alignment: number = (dx * tx + dy * ty) / (dragLength * tangentLength);
       let score: number = Math.abs(alignment);
       if (score > bestScore) {
+        secondScore = bestScore;
         bestScore = score;
         bestAxis = axis;
         bestTurns = alignment >= 0 ? 1 : -1;
+      } else if (score > secondScore) {
+        secondScore = score;
       }
+    }
+    if (bestScore < 0.75 || bestScore - secondScore < 0.15) {
+      return null;
     }
     // Construct with literal axis/turn values, compatible with strict union types.
     if (bestAxis === 'x') {
-      return new CubeMove('x', face.x, bestTurns > 0 ? 1 : -1);
+      return new CubeMove('x', hit.x, bestTurns > 0 ? 1 : -1);
     }
     if (bestAxis === 'y') {
-      return new CubeMove('y', face.y, bestTurns > 0 ? 1 : -1);
+      return new CubeMove('y', hit.y, bestTurns > 0 ? 1 : -1);
     }
     if (bestAxis === 'z') {
-      return new CubeMove('z', face.z, bestTurns > 0 ? 1 : -1);
+      return new CubeMove('z', hit.z, bestTurns > 0 ? 1 : -1);
     }
     return null;
+  }
+
+  /** Current stable frame only. Null means the UI should ask for another view. */
+  getSwipeGuide(move: CubeMove): CubeSwipeGuide | null {
+    let model: CubeModel | null = this.lastModel;
+    if (model === null || !this.cacheIsCurrent() || move.layer >= model.order ||
+      move.layer < 0 || !Number.isInteger(move.layer) || Math.abs(move.turns) !== 1) {
+      return null;
+    }
+    let best: CubeSwipeGuide | null = null;
+    let bestQuality: number = -1;
+    // Center first, then inset samples: never suggest a seam or a hidden sticker.
+    let fractions: number[] = [0.5, 0.3, 0.7];
+    for (let i: number = 0; i < this.faces.length; i++) {
+      let face: CubeVisibleFace = this.faces[i];
+      if (face.sticker.length !== 4 || this.layerCoordinate(face.cubie, move.axis) !== move.layer) {
+        continue;
+      }
+      let tangent: CubePoint2 = this.swipeTangent(face.normal, move.axis);
+      let length: number = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+      if (length < 0.0001) {
+        continue;
+      }
+      let area: number = 0;
+      for (let j: number = 0; j < 4; j++) {
+        let a: CubePoint2 = face.sticker[j];
+        let b: CubePoint2 = face.sticker[(j + 1) % 4];
+        area += a.x * b.y - a.y * b.x;
+      }
+      area = Math.abs(area) * 0.5;
+      for (let u: number = 0; u < fractions.length; u++) {
+        for (let v: number = 0; v < fractions.length; v++) {
+          let s: number = fractions[u];
+          let t: number = fractions[v];
+          let p: CubePoint2[] = face.sticker;
+          let x: number = p[0].x * (1 - s) * (1 - t) + p[1].x * s * (1 - t) +
+            p[2].x * s * t + p[3].x * (1 - s) * t;
+          let y: number = p[0].y * (1 - s) * (1 - t) + p[1].y * s * (1 - t) +
+            p[2].y * s * t + p[3].y * (1 - s) * t;
+          let hit: CubeSurfaceHit | null = this.boxHit(x, y);
+          if (hit === null || hit.x !== face.x || hit.y !== face.y || hit.z !== face.z ||
+            hit.normal.x !== face.normal.x || hit.normal.y !== face.normal.y ||
+            hit.normal.z !== face.normal.z) {
+            continue;
+          }
+          let guide: CubeSwipeGuide = new CubeSwipeGuide(x, y,
+            x + 55 * move.turns * tangent.x / length, y + 55 * move.turns * tangent.y / length);
+          // Keep the start circle and arrowhead inside the touchable Canvas.
+          let canvasMargin: number = Math.min(x, y, this.width - x, this.height - y,
+            guide.endX, guide.endY, this.width - guide.endX, this.height - guide.endY);
+          if (canvasMargin < 10) {
+            continue;
+          }
+          let picked: CubeMove | null = this.pickMove(x, y, guide.endX, guide.endY,
+            model, this.lastYaw, this.lastPitch);
+          if (picked === null || picked.axis !== move.axis || picked.layer !== move.layer ||
+            picked.turns !== move.turns) {
+            continue;
+          }
+          let clearance: number = canvasMargin;
+          for (let j: number = 0; j < 4; j++) {
+            let a: CubePoint2 = p[j];
+            let b: CubePoint2 = p[(j + 1) % 4];
+            let edgeLength: number = Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+            if (edgeLength > 0) {
+              clearance = Math.min(clearance,
+                Math.abs((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)) / edgeLength);
+            }
+          }
+          // Favor large visible stickers and starts well away from their edges.
+          let quality: number = Math.sqrt(area) + 2 * clearance;
+          if (quality > bestQuality) {
+            bestQuality = quality;
+            best = guide;
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Call after draw(). Does not clear or change the cached scene/touch geometry. */
+  drawGuide(ctx: CanvasRenderingContext2D, guide: CubeSwipeGuide): void {
+    let dx: number = guide.endX - guide.startX;
+    let dy: number = guide.endY - guide.startY;
+    let length: number = Math.sqrt(dx * dx + dy * dy);
+    if (!Number.isFinite(guide.startX) || !Number.isFinite(guide.startY) ||
+      !Number.isFinite(length) || length < 1 || !this.cacheIsCurrent()) {
+      return;
+    }
+    let ux: number = dx / length;
+    let uy: number = dy / length;
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.lineJoin = 'round';
+    // White halo under the blue shaft and head remains visible on every sticker.
+    for (let pass: number = 0; pass < 2; pass++) {
+      ctx.strokeStyle = pass === 0 ? '#FFFFFF' : '#1677FF';
+      ctx.lineWidth = pass === 0 ? 8 : 4;
+      ctx.beginPath();
+      ctx.moveTo(guide.startX, guide.startY);
+      ctx.lineTo(guide.endX, guide.endY);
+      ctx.moveTo(guide.endX - ux * 12 - uy * 7, guide.endY - uy * 12 + ux * 7);
+      ctx.lineTo(guide.endX, guide.endY);
+      ctx.lineTo(guide.endX - ux * 12 + uy * 7, guide.endY - uy * 12 - ux * 7);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(guide.startX, guide.startY, 7, 0, Math.PI * 2);
+    ctx.fillStyle = '#1677FF';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private cacheIsCurrent(allowAnimation: boolean = false): boolean {
+    let model: CubeModel | null = this.lastModel;
+    if ((!allowAnimation && this.animating) || model === null || model.order !== this.lastOrder ||
+      model.cubies.length !== this.cachedCubies.length) {
+      return false;
+    }
+    for (let i: number = 0; i < this.cachedCubies.length; i++) {
+      let cubie: Cubelet = model.cubies[i];
+      if (cubie !== this.cachedCubies[i] || cubie.x !== this.cachedCoordinates[i * 3] ||
+        cubie.y !== this.cachedCoordinates[i * 3 + 1] || cubie.z !== this.cachedCoordinates[i * 3 + 2]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private swipeTangent(normal: CubeVector3, axis: string): CubePoint2 {
+    let tangent: CubeVector3;
+    if (axis === 'x') {
+      tangent = new CubeVector3(0, -normal.z, normal.y);
+    } else if (axis === 'y') {
+      tangent = new CubeVector3(normal.z, 0, -normal.x);
+    } else {
+      tangent = new CubeVector3(-normal.y, normal.x, 0);
+    }
+    let camera: CubeVector3 = this.toCamera(tangent);
+    return new CubePoint2(camera.x, -camera.y);
   }
 
   private layerCoordinate(cubie: Cubelet, axis: string): number {
@@ -347,53 +532,37 @@ export class CubeRenderer {
     ctx.stroke();
   }
 
-  private faceAt(x: number, y: number): CubeVisibleFace | null {
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 ||
-      x > this.width || y > this.height) {
+  private boxHit(x: number, y: number): CubeSurfaceHit | null {
+    if (this.lastModel === null || !Number.isFinite(x) || !Number.isFinite(y) ||
+      x < 0 || y < 0 || x > this.width || y > this.height) {
       return null;
     }
-    // Reverse painter order is exactly the visible face on top at this pixel.
-    for (let i: number = this.faces.length - 1; i >= 0; i--) {
-      if (this.inside(x, y, this.faces[i].outline)) {
-        return this.faces[i];
+    let origin: CubeVector3 = this.fromCamera(new CubeVector3(0, 0, this.cameraDistance));
+    let ray: CubeVector3 = this.fromCamera(new CubeVector3((x - this.width * 0.5) / this.focal,
+      -(y - this.height * 0.5) / this.focal, -1));
+    let nearest: number = Number.POSITIVE_INFINITY;
+    let result: CubeSurfaceHit | null = null;
+    // Intersect the six faces of the closed [-1,1] envelope, not individual
+    // plastic quads. Seams and outer plastic insets remain touchable cube area.
+    for (let i: number = 0; i < this.bases.length; i++) {
+      let normal: CubeVector3 = this.bases[i].normal;
+      let denominator: number = normal.x * ray.x + normal.y * ray.y + normal.z * ray.z;
+      if (denominator >= -0.000001) {
+        continue;
       }
-    }
-    return null;
-  }
-
-  private inside(x: number, y: number, points: CubePoint2[]): boolean {
-    let positive: boolean = false;
-    let negative: boolean = false;
-    for (let i: number = 0; i < 4; i++) {
-      let a: CubePoint2 = points[i];
-      let b: CubePoint2 = points[(i + 1) % 4];
-      let cross: number = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
-      if (cross > 0.00001) {
-        positive = true;
-      } else if (cross < -0.00001) {
-        negative = true;
+      let distance: number = (1 - normal.x * origin.x - normal.y * origin.y -
+        normal.z * origin.z) / denominator;
+      if (distance <= 0 || distance >= nearest) {
+        continue;
       }
-      if (positive && negative) {
-        return false;
+      let point: CubeVector3 = new CubeVector3(origin.x + ray.x * distance,
+        origin.y + ray.y * distance, origin.z + ray.z * distance);
+      if (Math.abs(point.x) > 1.000001 || Math.abs(point.y) > 1.000001 || Math.abs(point.z) > 1.000001) {
+        continue;
       }
+      nearest = distance;
+      result = new CubeSurfaceHit(point, normal, this.lastOrder);
     }
-    return positive || negative;
-  }
-
-  private surfacePoint(x: number, y: number, face: CubeVisibleFace): CubeVector3 | null {
-    let ray: CubeVector3 = new CubeVector3((x - this.width * 0.5) / this.focal,
-      -(y - this.height * 0.5) / this.focal, -1);
-    let normal: CubeVector3 = face.cameraNormal;
-    let denominator: number = normal.x * ray.x + normal.y * ray.y + normal.z * ray.z;
-    if (Math.abs(denominator) < 0.000001) {
-      return null;
-    }
-    let center: CubeVector3 = face.cameraCenter;
-    let t: number = (normal.x * center.x + normal.y * center.y +
-      normal.z * (center.z - this.cameraDistance)) / denominator;
-    if (t <= 0) {
-      return null;
-    }
-    return this.fromCamera(new CubeVector3(ray.x * t, ray.y * t, this.cameraDistance - t));
+    return result;
   }
 }

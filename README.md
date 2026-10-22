@@ -7,7 +7,7 @@
 - 首页选择 **2 / 3 / 4 / 5 阶**；核心模型支持 2–7 阶。
 - 黑色分块、六色贴纸、透视视角、逐层平滑动画。
 - 在魔方表面滑动转层（支持内层）；拖动空白或双指拖动旋转视角；提供“正视角”按钮。
-- U / D / L / R / F / B 十二个正反转按钮；方向以正对相应魔方面为准，而不是当前屏幕方向。
+- **纯滑动转层，无 U / D / L / R / F / B 转面按钮**。沿表面行或列滑动至少 24vp，松手转 90°；模糊斜滑不提交。缝隙也按魔方表面拾取，支持内层。
 - 打乱、撤销、复位、历史提示、五步入门教程。
 - 打乱不计步；打乱后第一手开始计时，六面同色自动结束；后台暂停计时与动画调度。
 - 本地成绩、按阶最佳、最近 20 条展示（最多保留 200 条）、确认后清空。
@@ -18,7 +18,9 @@
 
 - **不是通用魔方求解器。**“历史提示”消除相邻互逆操作后逆向回放本局操作，包含打乱和玩家操作；它不是最短公式。使用提示后本局只作为练习，不计入成绩。
 - **复位不是求解动画**：直接清除本局并重建完成态。
-- 入门教程使用固定五手外层序列，再按逆序高亮引导，不记成绩；原版为随机五手。
+- 入门教程使用固定五手外层序列，再按逆序显示滑动箭头，不记成绩；原版为随机五手。从圆点滑向箭头即可完成当前步；看不到箭头时拖动空白或双指转动视角。
+- 选轴参照 Android 的 `axis × faceNormal` 投影，要求匹配分 ≥0.75 且领先次选 ≥0.15。忙碌时单指触碰魔方不触发新操作，背景或双指仍能旋转视角。
+- 视角拖动方向与 Android 对齐，但本版仍使用 yaw/pitch 并限制俯仰 ±1.45rad，不是原版的无限旋转矩阵。
 - 打乱长度沿用 11 / 25 / 45 / 65 个动画动作；本版每个动作都是 ±90°，不含单独的 180° 动作，因此不承诺与原版随机分布一致。
 - 撤销立即落地，不播放转层动画；`moveCount` 为当前未撤销的用户操作数量。
 - Canvas 使用面深度排序，不是 Filament 的逐像素深度缓冲。逻辑与动画几何有自动化测试，复杂遮挡和低端设备性能仍应真机验收。
@@ -27,7 +29,7 @@
 
 ## 已验证结果
 
-完整记录见 [verification/RESULTS.md](verification/RESULTS.md)：Debug / Release 构建成功，145 项自动化测试通过，最终 Release 在 HarmonyOS API 24 模拟器上的 58 项交互检查通过。真机与上架验证边界在报告中单独列出。
+当前纯手势版本见 [verification/gestures/RESULTS.md](verification/gestures/RESULTS.md)：Debug / Release 构建成功，211 项自动化测试与420项离线箭头坐标检查通过，最终 Release 在 HarmonyOS API 24 模拟器上的92项交互检查通过。真机与上架验证边界在报告中单独列出。此前按钮版报告保留在 `verification/RESULTS.md`，不代表当前界面。
 
 ## 开发环境
 
@@ -35,10 +37,10 @@
 
 - Windows，DevEco Studio **6.1.1.300**。
 - 编译 / target：HarmonyOS **6.1.1 / API 24**。
-- compatible：HarmonyOS **5.0.0 / API 12**。
+- 当前工程 compatible：HarmonyOS **6.1.1 / API 24**（保留现有工程配置）。
 - 构建使用 DevEco 自带 Node、Hvigor、JBR；逻辑测试使用 **Node.js 24**。
 - 元服务配置：`AppScope/app.json5` 的 `bundleType: atomicService`，`entry/src/main/module.json5` 的 `installationFree: true`。
-- API 12 兼容元服务按本机官方模板设置 `useNormalizedOHMUrl: false`。
+- 保留当前工程的 `useNormalizedOHMUrl: false` 设置。
 
 ## 构建
 
@@ -53,7 +55,7 @@
 
 脚本仅在当前进程设置 SDK / Java 环境，并在退出时恢复，不修改系统环境变量。
 
-本次验证额外保留了 `dist/razor-cube-debug-unsigned.hap` 和 `dist/razor-cube-release-unsigned.hap`。它们是本次交付快照；以后修改源码请重新构建，不能继续使用旧快照。
+仓库仅同步源码、测试、构建脚本与 Markdown 验证报告。`dist/` 安装包、校验文件，以及 `verification/` 下的截图、布局 JSON 和日志均为本地生成产物，已加入 `.gitignore`，需要时重新构建或运行测试生成。
 
 默认产物：
 
@@ -61,7 +63,7 @@
 entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
-**未配置或复制任何开发者证书。** 本地 API 24 模拟器接受此未签名调试包；这不代表其他设备也能接受。真机、分发和上架需用你自己的 AppGallery Connect 元服务应用、包名及证书，在 DevEco 的 Signing Configs 中配置签名。当前包名为 `com.razor.cube.atomic`，发布前应替换为你注册的包名。
+**共享构建配置不包含签名证书、口令或本机绝对路径，默认生成未签名包。** 本地 API 24 模拟器曾接受未签名调试包；这不代表其他设备也能接受。真机、分发和上架需使用你自己的 AppGallery Connect 元服务应用和证书，在 DevEco 的 Signing Configs 中配置签名，且不要提交签名材料。当前包名为 `com.atomicservice.6917619740903087965`，以 `AppScope/app.json5` 为准。本机原签名配置已备份至被忽略的 `.local/build-profile.json5`，不会随 Git 同步。
 
 ## 自动化测试
 
@@ -72,7 +74,7 @@ node --unhandled-rejections=strict --test tests/*.test.mjs
 ```
 
 - `cube-model.test.mjs`：各阶各轴各层正逆转、四次复原、整数坐标、整体旋转完成判定、打乱、历史提示收敛、撤销重做与非法输入。
-- `cube-renderer.test.mjs`：2–7 阶、35 个视角、38,920 次方向拾取、1,296 个动画帧；动画末态与实际提交态一致，绘制不修改模型。
+- `cube-renderer.test.mjs`：2–7 阶、35 个视角、1,296 个动画帧；验证 Android 切向选轴、歧义拒绝、缝隙命中、2,612 个教程箭头回代及动画末态一致性。
 - `cube-store.test.mjs`：损坏数据、安全验证、异步写入顺序、错误传播、记录裁剪及恢复。
 - `cube-feedback.test.mjs`：音频与振动能力独立、准备超时、释放期间迟到资源回收、音效不排队。
 - `cube-touch.test.mjs`：直接提取实际页面触摸方法，验证 Harmony 抬手事件、多指切换、取消、阈值及忙碌保护。
@@ -86,10 +88,10 @@ node --unhandled-rejections=strict --test tests/*.test.mjs
 $hdc = 'C:\Program Files\Huawei\DevEco Studio\sdk\default\openharmony\toolchains\hdc.exe'
 & $hdc list targets
 & $hdc -t 127.0.0.1:5633 install -r entry/build/default/outputs/default/entry-default-unsigned.hap
-& $hdc -t 127.0.0.1:5633 shell aa start -a EntryAbility -b com.razor.cube.atomic
+& $hdc -t 127.0.0.1:5633 shell aa start -a EntryAbility -b com.atomicservice.6917619740903087965
 ```
 
-不要在有多个设备时省略 `-t`，避免误操作其他真机。`scripts/smoke.mjs` 使用 HDC / UI Test 对已安装元服务进行界面冒烟测试，默认仅连接 `127.0.0.1:5633`；可用 `HDC_TARGET` 指定专用测试设备。它会重新启动本应用并操作测试局与偏好设置，不应对正在使用的个人会话运行。截图、布局和结果保存在 `verification/ui/`。
+不要在有多个设备时省略 `-t`，避免误操作其他真机。`scripts/smoke.mjs` 使用 HDC / UI Test 对已安装元服务进行界面冒烟测试，默认仅连接 `127.0.0.1:5633`；可用 `HDC_TARGET` 指定专用测试设备。它会重新启动本应用并操作测试局与偏好设置，不应对正在使用的个人会话运行。运行生成的截图、布局和结果默认保存在本地 `verification/gestures/`，可用 `SMOKE_OUT` 指定其他目录；这些产物不纳入 Git。测试脚本从 `AppScope/app.json5` 读取当前包名。运行前请按 `hdc list targets` 设置实际设备，例如 `$env:HDC_TARGET='127.0.0.1:5559'`，再执行 `node scripts/smoke.mjs`。
 
 ## 结构
 
@@ -115,7 +117,7 @@ verification/                     本地设备验证证据
 
 ## 待真机验收
 
-- 在最低兼容 API 12 设备上验证安装、元服务入口和平台 API。
+- 在符合当前 compatible API 24 的实体设备上验证安装、元服务入口和平台 API。
 - 真机音量、静音策略、振动反馈，以及低端机 5 阶动画性能。
 - 大字体、小屏、平板与折叠屏窗口适配。
 - 正式签名、元服务分发入口、AppGallery 审核和实际发布包体限制。

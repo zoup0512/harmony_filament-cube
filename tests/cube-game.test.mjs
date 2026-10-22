@@ -15,7 +15,7 @@ const names = [
   'startTimers', 'stopTimers', 'onForegroundChanged', 'draw', 'frame', 'animate',
   'resetSession', 'chooseOrder', 'startGame', 'leavePage', 'doScramble',
   'faceMove', 'moveLabel', 'sameMove', 'requestMove', 'undo', 'showHint',
-  'doLesson', 'updateLessonHint', 'isLessonFace', 'finishSolve', 'toast'
+  'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
@@ -24,7 +24,7 @@ const members = names.map(name => {
   return matches[0][0];
 });
 // Preserve real field defaults, stripping only ArkUI decorators; platform
-// constructors below are inert mocks, and canvasReady remains false throughout.
+// constructors below are inert mocks. Only guide tests opt into a ready canvas.
 const fields = source.match(/^struct Index \{\r?\n([\s\S]*?)(?=^  aboutToAppear\()/m);
 assert.ok(fields, 'Index.ets field declarations must be extractable');
 const declarations = fields[1].replace(/@\w+(?:\([^\r\n)]*\))?\s*/g, '');
@@ -43,11 +43,12 @@ function seededRandom() {
   return () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
 }
 
-function harness(t, { order = 3, speed = 1 } = {}) {
+function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = true } = {}) {
   let now = 1_000_000;
   let nextTimer = 0;
   const timers = new Map();
-  const calls = { draw: [], feedback: [], records: [], pending: [], toasts: [] };
+  const calls = { draw: [], getSwipeGuide: [], drawGuide: [], feedback: [], records: [], pending: [], toasts: [] };
+  const guide = guideVisible ? { startX: 100, startY: 120, endX: 150, endY: 140 } : null;
   class FakeDate extends Date {
     constructor(...args) { super(...(args.length ? args : [now])); }
     static now() { return now; }
@@ -67,7 +68,11 @@ function harness(t, { order = 3, speed = 1 } = {}) {
   }
   const GameHarness = script.runInNewContext({
     CubeModel, CubeMove, Date: FakeDate, CubeStore: MockStore,
-    CubeRenderer: class { draw(...args) { calls.draw.push(args); } },
+    CubeRenderer: class {
+      draw(...args) { calls.draw.push(args); }
+      getSwipeGuide(...args) { calls.getSwipeGuide.push(args); return guide; }
+      drawGuide(...args) { calls.drawGuide.push(args); }
+    },
     CubeFeedback: class { play(...args) { calls.feedback.push(args); } },
     CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
     setInterval(callback, delay) {
@@ -85,6 +90,7 @@ function harness(t, { order = 3, speed = 1 } = {}) {
     getPromptAction: () => ({ showToast: ({ message }) => calls.toasts.push(message) })
   });
   state.startGame();
+  state.canvasReady = canvasReady;
   const clock = {
     now: () => now,
     // Wall time and interval callbacks are deliberately separate. No real sleeps,
@@ -96,10 +102,14 @@ function harness(t, { order = 3, speed = 1 } = {}) {
   t.after(() => {
     state.stopTimers();
     assert.equal(timers.size, 0);
-    assert.equal(state.canvasReady, false);
-    assert.equal(calls.draw.length, 0, 'draw must not access an unready Canvas');
+    if (!canvasReady) {
+      assert.equal(state.canvasReady, false);
+      assert.equal(calls.draw.length, 0, 'draw must not access an unready Canvas');
+      assert.equal(calls.getSwipeGuide.length, 0);
+      assert.equal(calls.drawGuide.length, 0);
+    }
   });
-  return { state, calls, clock };
+  return { state, calls, clock, guide };
 }
 
 function snapshot(model) { return JSON.stringify(model.cubies); }
@@ -289,13 +299,42 @@ test('tutorial rejects the wrong move, advances only after commits and never sav
   const setup = snapshot(s.model);
   s.showHint();
   assert.equal(s.assisted, false);
-  s.requestMove(s.lesson[0].inverse());
-  assert.equal(s.busy, false);
   assert.equal(snapshot(s.model), setup);
-  assert.equal(calls.toasts.length, 1);
+  assert.equal(s.hintMove, null, 'tutorial hints use the lesson target, not history');
+  const labels = ['D', "L'", 'F', "U'", "R'"];
+  assert.deepEqual(Array.from(s.lesson, move => s.moveLabel(move)), labels);
   for (let i = 0; i < s.lessonTotal; i++) {
     const expected = s.lesson[i];
-    assert.equal(s.isLessonFace(s.moveLabel(expected)), true);
+    const hint = s.hint;
+    assert.ok(hint.startsWith(`第 ${i + 1} / ${s.lessonTotal} 步：`));
+    assert.ok(hint.includes(`沿箭头滑动完成 ${labels[i]}`));
+    assert.match(hint, /从圆点滑向箭头/);
+    assert.match(hint, /松手转层/);
+    assert.match(hint, /看不到箭头.*转动视角/);
+    assert.doesNotMatch(hint, /按钮|高亮/);
+    const before = snapshot(s.model);
+    const wrongMoves = [
+      expected.inverse(),
+      new CubeMove(expected.axis, (expected.layer + 1) % s.order, expected.turns),
+      new CubeMove(expected.axis === 'x' ? 'y' : 'x', expected.layer, expected.turns)
+    ];
+    for (const wrong of wrongMoves) {
+      const toastCount = calls.toasts.length;
+      s.requestMove(wrong);
+      assert.equal(s.lessonIndex, i, 'wrong gesture must not advance the target step');
+      assert.equal(s.phase, 'tutorial');
+      assert.equal(s.busy, false);
+      assert.equal(s.activeMove, null);
+      assert.equal(s.queue.length, 0);
+      assert.equal(snapshot(s.model), before);
+      assert.equal(s.hint, hint);
+      assert.equal(s.moves, 0);
+      assert.equal(s.model.moveCount, 0);
+      assert.equal(calls.records.length, 0);
+      assert.equal(calls.feedback.length, i);
+      assert.equal(calls.toasts.length, toastCount + 1);
+      assert.match(calls.toasts.at(-1), /从箭头圆点沿箭头滑动.*当前教程步骤/);
+    }
     s.requestMove(new CubeMove(expected.axis, expected.layer, expected.turns));
     assert.equal(s.lessonIndex, i);
     assert.equal(s.queueKind, 'lessonStep');
@@ -314,6 +353,98 @@ test('tutorial rejects the wrong move, advances only after commits and never sav
   assert.equal(s.startedAt, 0);
   assert.equal(calls.feedback.length, 5);
   assert.match(s.hint, /教程完成/);
+});
+
+test('ready canvas draws the current lesson arrow and hides it throughout animation', t => {
+  const h = harness(t, { canvasReady: true });
+  const { state: s, calls, guide } = h;
+  s.doLesson();
+  for (let i = 0; i < 4; i++) completeMove(h, 65);
+  assert.equal(calls.getSwipeGuide.length, 0, 'setup animation has no arrow');
+  assert.equal(calls.drawGuide.length, 0);
+  completeMove(h, 65);
+  for (let i = 0; i < s.lessonTotal; i++) {
+    assert.equal(s.lessonIndex, i);
+    assert.equal(calls.getSwipeGuide.at(-1)[0], s.lesson[i]);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide]);
+    const guides = calls.drawGuide.length;
+    const lookups = calls.getSwipeGuide.length;
+    s.requestMove(s.lesson[i]);
+    s.draw();
+    completeMove(h, 219);
+    assert.equal(calls.drawGuide.length, guides, 'busy moves must not draw stale arrows');
+    assert.equal(calls.getSwipeGuide.length, lookups);
+    completeMove(h, 1);
+    assert.equal(calls.drawGuide.length, guides + (i < s.lessonTotal - 1 ? 1 : 0));
+  }
+  assert.equal(s.phase, 'idle');
+  const guides = calls.drawGuide.length;
+  s.draw();
+  assert.equal(calls.drawGuide.length, guides, 'completed tutorial has no arrow');
+  assert.ok(calls.draw.length > 0);
+  const draw = calls.draw.at(-1);
+  assert.deepEqual(draw, [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.yaw, s.pitch, null, 0]);
+});
+
+for (const followHint of [true, false]) {
+  test(`history arrow clears when turning ${followHint ? 'the suggested' : 'a different'} layer`, t => {
+    const h = harness(t, { canvasReady: true });
+    const { inverse } = oneMoveAway(h);
+    const { state: s, calls, guide } = h;
+    s.showHint();
+    assert.equal(s.sameMove(s.hintMove, inverse), true);
+    assert.equal(calls.getSwipeGuide.at(-1)[0], s.hintMove);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide]);
+    assert.match(s.hint, /沿箭头滑动/);
+    assert.equal(s.assisted, true);
+    const guides = calls.drawGuide.length;
+    const lookups = calls.getSwipeGuide.length;
+    s.requestMove(followHint ? inverse : s.faceMove('U'));
+    assert.equal(s.hintMove, null, 'accepted turn invalidates history arrow immediately');
+    assert.equal(s.hint, '');
+    s.draw();
+    completeMove(h);
+    s.draw();
+    assert.equal(calls.drawGuide.length, guides);
+    assert.equal(calls.getSwipeGuide.length, lookups);
+    assert.equal(calls.records.length, 0, 'clearing the arrow must not clear assisted status');
+    assert.equal(s.assisted, true);
+  });
+}
+
+for (const action of ['undo', 'resetSession']) {
+  test(`${action} clears history hint arrow`, t => {
+    const h = harness(t, { canvasReady: true });
+    const { state: s, calls } = h;
+    s.requestMove(s.faceMove('R'));
+    completeMove(h);
+    s.showHint();
+    assert.notEqual(s.hintMove, null);
+    assert.equal(calls.drawGuide.length, 1);
+    s[action]();
+    assert.equal(s.hintMove, null);
+    assert.equal(s.hint, '');
+    assert.equal(calls.drawGuide.length, 1);
+    assert.equal(s.model.isSolved(), true);
+  });
+}
+
+test('invisible targets and non-game pages never draw a guide', t => {
+  const hidden = harness(t, { canvasReady: true, guideVisible: false });
+  oneMoveAway(hidden);
+  hidden.state.showHint();
+  assert.equal(hidden.calls.getSwipeGuide.length, 1);
+  assert.equal(hidden.calls.drawGuide.length, 0, 'null guide must not reach drawGuide');
+  assert.match(hidden.state.hint, /看不到箭头.*转动视角/);
+  const h = harness(t, { canvasReady: true });
+  oneMoveAway(h);
+  h.state.showHint();
+  for (const page of ['home', 'stats', 'settings']) {
+    h.state.page = page;
+    h.state.draw();
+  }
+  assert.equal(h.calls.getSwipeGuide.length, 1);
+  assert.equal(h.calls.drawGuide.length, 1);
 });
 
 for (const kind of ['user', 'scramble', 'lessonSetup', 'lessonStep']) {
