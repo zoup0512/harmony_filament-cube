@@ -1,6 +1,7 @@
 import { UIAbility } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { CubeTheme } from '../pages/CubeTheme';
 
 export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -14,10 +15,10 @@ export default class EntryAbility extends UIAbility {
     }
     windowStage.getMainWindow().then((mainWindow: window.Window) => {
       mainWindow.setWindowSystemBarProperties({
-        statusBarColor: '#0E1016',
-        statusBarContentColor: '#F7F8FC',
-        navigationBarColor: '#0E1016',
-        navigationBarContentColor: '#F7F8FC'
+        statusBarColor: CubeTheme.background,
+        statusBarContentColor: CubeTheme.ink,
+        navigationBarColor: CubeTheme.background,
+        navigationBarContentColor: CubeTheme.ink
       });
     }).catch(() => {});
   }

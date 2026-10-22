@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'verification', 'ui');
+const OUT = process.env.SMOKE_OUT ? resolve(process.env.SMOKE_OUT) : join(ROOT, 'verification', 'ui');
 const HDC = 'C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/toolchains/hdc.exe';
 const TARGET = process.env.HDC_TARGET || '127.0.0.1:5633';
 const BUNDLE = 'com.razor.cube.atomic';
@@ -120,7 +120,9 @@ function find(state, query, type) {
   return state.nodes.find(n => (!type || n.type === type) && usable(n, state) && matches(n, query));
 }
 const has = (state, query) => Boolean(find(state, query));
-const button = (state, query) => find(state, query, 'Button');
+const button = (state, query) => find(state, query, 'Button') || state.nodes.find(n =>
+  n.type === 'Button' && usable(n, state) && descendants(n).some(child =>
+    child !== n && child.type === 'Text' && usable(child, state) && matches(child, query)));
 const enabledButton = (state, query) => button(state, query)?.enabled === true;
 function alertDialog(state, title) {
   const dialogs = state.nodes.filter(n => n.type === 'AlertDialog' && usable(n, state) &&
