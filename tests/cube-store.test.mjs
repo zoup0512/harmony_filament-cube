@@ -24,7 +24,7 @@ const { CubeStore, CubeSettings, SolveRecord, default: DefaultStore } = await im
   dataURL(stripTypeScriptTypes(rewritten, { mode: 'strip' }))
 );
 
-const defaults = { defaultOrder: 3, speed: 1, sound: false, haptics: true, beginnerGuides: true };
+const defaults = { defaultOrder: 3, speed: 1, sound: true, haptics: true, beginnerGuides: true };
 const settings = overrides => ({ ...defaults, ...overrides });
 const record = overrides => ({ order: 3, durationMs: 1234.5, moves: 20, date: 100, ...overrides });
 const plain = value => JSON.parse(JSON.stringify(value));

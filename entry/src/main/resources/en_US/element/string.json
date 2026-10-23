@@ -1,0 +1,424 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Offline 2×2–5×5 cube atomic service"
+    },
+    {
+      "name": "ability_desc",
+      "value": "Cool Cube"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Cool Cube"
+    },
+    {
+      "name": "storage_unavailable",
+      "value": "Local storage is unavailable. You can still play this session."
+    },
+    {
+      "name": "scramble_ready",
+      "value": "Scrambled. Make your first move to start the timer."
+    },
+    {
+      "name": "lesson_complete",
+      "value": "Tutorial complete! You can now swipe to turn layers. Try a scramble challenge."
+    },
+    {
+      "name": "leave_title",
+      "value": "Return home?"
+    },
+    {
+      "name": "leave_message",
+      "value": "Your current game will not be saved. Completed results will not be affected."
+    },
+    {
+      "name": "keep_playing",
+      "value": "Keep playing"
+    },
+    {
+      "name": "return_home",
+      "value": "Home"
+    },
+    {
+      "name": "reset_title",
+      "value": "Reset the cube?"
+    },
+    {
+      "name": "reset_message",
+      "value": "Restore the solved state and clear the timer. This is not an automatic solve."
+    },
+    {
+      "name": "cancel",
+      "value": "Cancel"
+    },
+    {
+      "name": "reset",
+      "value": "Reset"
+    },
+    {
+      "name": "rescramble_title",
+      "value": "Scramble again?"
+    },
+    {
+      "name": "rescramble_message",
+      "value": "Discard this game and start a new timed challenge."
+    },
+    {
+      "name": "rescramble",
+      "value": "Scramble again"
+    },
+    {
+      "name": "scrambling_hint",
+      "value": "Scrambling…"
+    },
+    {
+      "name": "layer_move",
+      "value": "%1$s layer %2$d %3$s"
+    },
+    {
+      "name": "lesson_follow",
+      "value": "Follow the hand with a swipe, then release to complete this tutorial step."
+    },
+    {
+      "name": "free_practice_hint",
+      "value": "Free practice. Tap Scramble to start a new timed challenge."
+    },
+    {
+      "name": "nothing_to_undo",
+      "value": "No moves to undo yet."
+    },
+    {
+      "name": "history_hint",
+      "value": "History hint: %1$s. Swipe along the hand’s path, then release to turn the layer. Rotate the view if the hand is hidden. This retraces your moves, not an optimal solution. This session will not count toward your results."
+    },
+    {
+      "name": "lesson_title",
+      "value": "Start the tutorial?"
+    },
+    {
+      "name": "lesson_message",
+      "value": "End this game and start a five-step practice solve. Tutorials do not count toward your results."
+    },
+    {
+      "name": "start_lesson",
+      "value": "Start tutorial"
+    },
+    {
+      "name": "lesson_preparing",
+      "value": "Preparing the five-step tutorial…"
+    },
+    {
+      "name": "lesson_step",
+      "value": "Step %1$d / %2$d: Follow the hand to make %3$s. Swipe in the demonstrated direction, then release to turn the layer. If the hand is hidden, drag the background or use two fingers to rotate the view."
+    },
+    {
+      "name": "solved_assisted",
+      "value": "Solved! Hints were used, so this practice session will not count toward your results."
+    },
+    {
+      "name": "solved_saving",
+      "value": "Solved! Saving your result…"
+    },
+    {
+      "name": "solved_saved",
+      "value": "Solved! Your result has been saved."
+    },
+    {
+      "name": "solved_save_failed",
+      "value": "Solved, but your result could not be saved on this device."
+    },
+    {
+      "name": "previous_save_failed",
+      "value": "The previous result could not be saved."
+    },
+    {
+      "name": "settings_save_failed",
+      "value": "Could not save settings. Please try again later."
+    },
+    {
+      "name": "clear_title",
+      "value": "Clear all results?"
+    },
+    {
+      "name": "clear_message",
+      "value": "This cannot be undone. Your settings will be kept."
+    },
+    {
+      "name": "clear_results",
+      "value": "Clear results"
+    },
+    {
+      "name": "clear_failed",
+      "value": "Could not clear results. Please try again later."
+    },
+    {
+      "name": "phase_scrambling",
+      "value": "Scrambling"
+    },
+    {
+      "name": "phase_ready",
+      "value": "Ready to start"
+    },
+    {
+      "name": "phase_assisted",
+      "value": "Assisted practice"
+    },
+    {
+      "name": "phase_playing",
+      "value": "Timed challenge"
+    },
+    {
+      "name": "phase_solved",
+      "value": "Solved"
+    },
+    {
+      "name": "phase_tutorial",
+      "value": "Tutorial"
+    },
+    {
+      "name": "phase_idle",
+      "value": "Free practice"
+    },
+    {
+      "name": "cube_accessibility",
+      "value": "%1$d by %1$d cube. Swipe along a row or column and release to turn a layer. Drag the background or use two fingers to rotate the view."
+    },
+    {
+      "name": "order_beginner",
+      "value": "Easy start"
+    },
+    {
+      "name": "order_classic",
+      "value": "Classic challenge"
+    },
+    {
+      "name": "order_advanced",
+      "value": "Explore more"
+    },
+    {
+      "name": "order_expert",
+      "value": "Expert challenge"
+    },
+    {
+      "name": "brand_name",
+      "value": "COOL CUBE"
+    },
+    {
+      "name": "brand_tagline",
+      "value": "Find focus in every turn"
+    },
+    {
+      "name": "home_welcome",
+      "value": "Your cube. Your pace."
+    },
+    {
+      "name": "home_subtitle",
+      "value": "A little brain workout, anytime"
+    },
+    {
+      "name": "interactive_preview",
+      "value": "Interactive preview"
+    },
+    {
+      "name": "preview_help",
+      "value": "Drag the cube to explore every side"
+    },
+    {
+      "name": "choose_challenge",
+      "value": "Choose your challenge"
+    },
+    {
+      "name": "order_label",
+      "value": "%1$d×%1$d"
+    },
+    {
+      "name": "order_accessibility",
+      "value": "%1$d by %1$d%2$s"
+    },
+    {
+      "name": "selected_suffix",
+      "value": ", selected"
+    },
+    {
+      "name": "start_game",
+      "value": "Play  →"
+    },
+    {
+      "name": "statistics",
+      "value": "Statistics"
+    },
+    {
+      "name": "settings",
+      "value": "Settings"
+    },
+    {
+      "name": "offline_footer",
+      "value": "Just play. No ads. Fully offline."
+    },
+    {
+      "name": "cube_title",
+      "value": "%1$d × %1$d Cube"
+    },
+    {
+      "name": "elapsed_time",
+      "value": "Time"
+    },
+    {
+      "name": "move_count",
+      "value": "Moves"
+    },
+    {
+      "name": "guided_help",
+      "value": "Follow the hand; release to turn.\nDrag the background or use two fingers to rotate."
+    },
+    {
+      "name": "gesture_help",
+      "value": "Swipe as shown on the corners; release to turn.\nMiddle pieces work too. Background or two fingers: rotate."
+    },
+    {
+      "name": "guides_button",
+      "value": "Guides %1$s"
+    },
+    {
+      "name": "guides_accessibility",
+      "value": "Beginner gesture guides, %1$s"
+    },
+    {
+      "name": "on",
+      "value": "on"
+    },
+    {
+      "name": "off",
+      "value": "off"
+    },
+    {
+      "name": "reset_view",
+      "value": "View"
+    },
+    {
+      "name": "scramble",
+      "value": "Scramble"
+    },
+    {
+      "name": "tutorial",
+      "value": "Tutorial"
+    },
+    {
+      "name": "undo",
+      "value": "↶ Undo"
+    },
+    {
+      "name": "history_help",
+      "value": "History hint"
+    },
+    {
+      "name": "personal_best",
+      "value": "PERSONAL BEST"
+    },
+    {
+      "name": "stats_tagline",
+      "value": "Every second counts."
+    },
+    {
+      "name": "completed_challenges",
+      "value": "Completed challenges"
+    },
+    {
+      "name": "solve_unit",
+      "value": "total"
+    },
+    {
+      "name": "completed_count",
+      "value": "Completed: %1$d"
+    },
+    {
+      "name": "recent_results",
+      "value": "Recent results · Latest 20"
+    },
+    {
+      "name": "clear",
+      "value": "Clear"
+    },
+    {
+      "name": "no_results",
+      "value": "No results yet"
+    },
+    {
+      "name": "no_results_help",
+      "value": "Scramble and solve the cube\nto set your first record."
+    },
+    {
+      "name": "record_details",
+      "value": "Moves: %1$d · %2$s"
+    },
+    {
+      "name": "best",
+      "value": "Best"
+    },
+    {
+      "name": "results_retention",
+      "value": "Only the latest 200 results are kept on this device.\nTutorials and sessions using history hints do not count."
+    },
+    {
+      "name": "default_order",
+      "value": "Default size"
+    },
+    {
+      "name": "default_order_help",
+      "value": "Applies on the home screen"
+    },
+    {
+      "name": "turn_animation",
+      "value": "Turn animation"
+    },
+    {
+      "name": "speed_accessibility",
+      "value": "Turn animation speed, 0.5 to 2 times"
+    },
+    {
+      "name": "speed_slow",
+      "value": "Relaxed 0.5×"
+    },
+    {
+      "name": "speed_fast",
+      "value": "Quick 2.0×"
+    },
+    {
+      "name": "beginner_guides",
+      "value": "Beginner gesture guides"
+    },
+    {
+      "name": "beginner_guides_help",
+      "value": "Follow the corner gestures; release to turn.\nHands and faint swipe paths appear only at visible corners.\nMiddle pieces work too. These guides do not solve the cube."
+    },
+    {
+      "name": "turn_sound",
+      "value": "Turn sounds"
+    },
+    {
+      "name": "turn_sound_help",
+      "value": "Hear each turn click into place"
+    },
+    {
+      "name": "haptic_feedback",
+      "value": "Haptic feedback"
+    },
+    {
+      "name": "haptic_help",
+      "value": "Subtle vibrations · On supported devices"
+    },
+    {
+      "name": "about_name",
+      "value": "Cool Cube"
+    },
+    {
+      "name": "about_tagline",
+      "value": "Less distraction. More focus."
+    },
+    {
+      "name": "about_description",
+      "value": "A lightweight 3D cube, ready anytime. All calculations and results stay on your device. No ads or internet required."
+    }
+  ]
+}

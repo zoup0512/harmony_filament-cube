@@ -1,7 +1,424 @@
 {
   "string": [
-    { "name": "module_desc", "value": "离线多阶魔方元服务" },
-    { "name": "ability_desc", "value": "Razor Cube 魔方" },
-    { "name": "EntryAbility_label", "value": "Razor Cube 魔方" }
+    {
+      "name": "module_desc",
+      "value": "离线多阶魔方元服务"
+    },
+    {
+      "name": "ability_desc",
+      "value": "酷比魔方"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "酷比魔方"
+    },
+    {
+      "name": "storage_unavailable",
+      "value": "本地存储暂不可用，本次仍可游玩。"
+    },
+    {
+      "name": "scramble_ready",
+      "value": "已打乱。转动第一手开始计时。"
+    },
+    {
+      "name": "lesson_complete",
+      "value": "教程完成！你已经学会滑动转层，试试打乱挑战吧。"
+    },
+    {
+      "name": "leave_title",
+      "value": "返回首页？"
+    },
+    {
+      "name": "leave_message",
+      "value": "本局进度不会保存，已完成的成绩不受影响。"
+    },
+    {
+      "name": "keep_playing",
+      "value": "继续玩"
+    },
+    {
+      "name": "return_home",
+      "value": "返回首页"
+    },
+    {
+      "name": "reset_title",
+      "value": "复位魔方？"
+    },
+    {
+      "name": "reset_message",
+      "value": "直接恢复六面同色并清除本局计时。这不是自动求解。"
+    },
+    {
+      "name": "cancel",
+      "value": "取消"
+    },
+    {
+      "name": "reset",
+      "value": "复位"
+    },
+    {
+      "name": "rescramble_title",
+      "value": "重新打乱？"
+    },
+    {
+      "name": "rescramble_message",
+      "value": "将放弃当前一局，重新开始计时挑战。"
+    },
+    {
+      "name": "rescramble",
+      "value": "重新打乱"
+    },
+    {
+      "name": "scrambling_hint",
+      "value": "正在打乱…"
+    },
+    {
+      "name": "layer_move",
+      "value": "%1$s 第 %2$d 层 %3$s"
+    },
+    {
+      "name": "lesson_follow",
+      "value": "请跟随小手滑动，松手完成当前教程步骤。"
+    },
+    {
+      "name": "free_practice_hint",
+      "value": "自由练习。点击“打乱”开始新的计时挑战。"
+    },
+    {
+      "name": "nothing_to_undo",
+      "value": "还没有可以撤销的操作。"
+    },
+    {
+      "name": "history_hint",
+      "value": "历史回退参考：%1$s，跟随小手沿轨迹滑动，松手转层；看不到小手时请转动视角。这是逆向回放，不是最优求解；本局不计入成绩。"
+    },
+    {
+      "name": "lesson_title",
+      "value": "开始入门教程？"
+    },
+    {
+      "name": "lesson_message",
+      "value": "将结束本局，进入五步还原练习。教程不记成绩。"
+    },
+    {
+      "name": "start_lesson",
+      "value": "开始教程"
+    },
+    {
+      "name": "lesson_preparing",
+      "value": "准备五步教程…"
+    },
+    {
+      "name": "lesson_step",
+      "value": "第 %1$d / %2$d 步：跟随小手完成 %3$s。按小手示范的方向滑动，松手转层；看不到小手时，拖动空白或双指转动视角。"
+    },
+    {
+      "name": "solved_assisted",
+      "value": "还原成功！本局使用了提示，作为练习不记录成绩。"
+    },
+    {
+      "name": "solved_saving",
+      "value": "还原成功！正在保存成绩…"
+    },
+    {
+      "name": "solved_saved",
+      "value": "还原成功！成绩已记录。"
+    },
+    {
+      "name": "solved_save_failed",
+      "value": "还原成功，但本地成绩保存失败。"
+    },
+    {
+      "name": "previous_save_failed",
+      "value": "上局成绩保存失败。"
+    },
+    {
+      "name": "settings_save_failed",
+      "value": "设置保存失败，请稍后重试。"
+    },
+    {
+      "name": "clear_title",
+      "value": "清空所有成绩？"
+    },
+    {
+      "name": "clear_message",
+      "value": "此操作不可撤销，设置不会被清除。"
+    },
+    {
+      "name": "clear_results",
+      "value": "清空成绩"
+    },
+    {
+      "name": "clear_failed",
+      "value": "清空失败，请稍后重试。"
+    },
+    {
+      "name": "phase_scrambling",
+      "value": "正在打乱"
+    },
+    {
+      "name": "phase_ready",
+      "value": "准备开始"
+    },
+    {
+      "name": "phase_assisted",
+      "value": "辅助练习"
+    },
+    {
+      "name": "phase_playing",
+      "value": "计时挑战"
+    },
+    {
+      "name": "phase_solved",
+      "value": "还原成功"
+    },
+    {
+      "name": "phase_tutorial",
+      "value": "入门教程"
+    },
+    {
+      "name": "phase_idle",
+      "value": "自由练习"
+    },
+    {
+      "name": "cube_accessibility",
+      "value": "%1$d 阶魔方，沿表面行或列滑动，松手转动一层。拖动背景或双指拖动旋转视角。"
+    },
+    {
+      "name": "order_beginner",
+      "value": "轻松入门"
+    },
+    {
+      "name": "order_classic",
+      "value": "经典挑战"
+    },
+    {
+      "name": "order_advanced",
+      "value": "进阶探索"
+    },
+    {
+      "name": "order_expert",
+      "value": "高手进阶"
+    },
+    {
+      "name": "brand_name",
+      "value": "酷比魔方"
+    },
+    {
+      "name": "brand_tagline",
+      "value": "把专注，交给每一次转动"
+    },
+    {
+      "name": "home_welcome",
+      "value": "你的魔方，你的节奏。"
+    },
+    {
+      "name": "home_subtitle",
+      "value": "随时开始一场小小的脑力旅行"
+    },
+    {
+      "name": "interactive_preview",
+      "value": "可交互预览"
+    },
+    {
+      "name": "preview_help",
+      "value": "拖动魔方，自由探索每一面"
+    },
+    {
+      "name": "choose_challenge",
+      "value": "选择你的挑战"
+    },
+    {
+      "name": "order_label",
+      "value": "%1$d 阶"
+    },
+    {
+      "name": "order_accessibility",
+      "value": "%1$d 阶%2$s"
+    },
+    {
+      "name": "selected_suffix",
+      "value": "，已选择"
+    },
+    {
+      "name": "start_game",
+      "value": "开始游戏  →"
+    },
+    {
+      "name": "statistics",
+      "value": "成绩统计"
+    },
+    {
+      "name": "settings",
+      "value": "偏好设置"
+    },
+    {
+      "name": "offline_footer",
+      "value": "纯粹玩，安心转  ·  无广告 / 离线可玩"
+    },
+    {
+      "name": "cube_title",
+      "value": "%1$d × %1$d 魔方"
+    },
+    {
+      "name": "elapsed_time",
+      "value": "用时"
+    },
+    {
+      "name": "move_count",
+      "value": "步数"
+    },
+    {
+      "name": "guided_help",
+      "value": "跟随小手滑动，松手转层\n空白或双指转视角"
+    },
+    {
+      "name": "gesture_help",
+      "value": "跟随角块上的手势滑动，松手转层\n中间方块也可滑动；空白或双指转视角"
+    },
+    {
+      "name": "guides_button",
+      "value": "手势 %1$s"
+    },
+    {
+      "name": "guides_accessibility",
+      "value": "新手手势提示，%1$s"
+    },
+    {
+      "name": "on",
+      "value": "开"
+    },
+    {
+      "name": "off",
+      "value": "关"
+    },
+    {
+      "name": "reset_view",
+      "value": "正视角"
+    },
+    {
+      "name": "scramble",
+      "value": "打乱"
+    },
+    {
+      "name": "tutorial",
+      "value": "教程"
+    },
+    {
+      "name": "undo",
+      "value": "↶ 撤销"
+    },
+    {
+      "name": "history_help",
+      "value": "历史提示"
+    },
+    {
+      "name": "personal_best",
+      "value": "PERSONAL BEST"
+    },
+    {
+      "name": "stats_tagline",
+      "value": "每一秒，都是新突破。"
+    },
+    {
+      "name": "completed_challenges",
+      "value": "已完成挑战"
+    },
+    {
+      "name": "solve_unit",
+      "value": "次"
+    },
+    {
+      "name": "completed_count",
+      "value": "%1$d 次完成"
+    },
+    {
+      "name": "recent_results",
+      "value": "最近成绩 · 最多显示 20 条"
+    },
+    {
+      "name": "clear",
+      "value": "清空"
+    },
+    {
+      "name": "no_results",
+      "value": "还没有成绩"
+    },
+    {
+      "name": "no_results_help",
+      "value": "打乱魔方并完成还原，\n留下你的第一个纪录。"
+    },
+    {
+      "name": "record_details",
+      "value": "%1$d 步 · %2$s"
+    },
+    {
+      "name": "best",
+      "value": "最佳"
+    },
+    {
+      "name": "results_retention",
+      "value": "仅保留本机最近 200 条成绩\n教程与使用历史提示的练习不记榜。"
+    },
+    {
+      "name": "default_order",
+      "value": "默认阶数"
+    },
+    {
+      "name": "default_order_help",
+      "value": "回到首页即可使用"
+    },
+    {
+      "name": "turn_animation",
+      "value": "转动动画"
+    },
+    {
+      "name": "speed_accessibility",
+      "value": "转动动画速度，0.5 至 2 倍"
+    },
+    {
+      "name": "speed_slow",
+      "value": "从容 0.5×"
+    },
+    {
+      "name": "speed_fast",
+      "value": "敏捷 2.0×"
+    },
+    {
+      "name": "beginner_guides",
+      "value": "新手手势提示"
+    },
+    {
+      "name": "beginner_guides_help",
+      "value": "跟随角块上的手势滑动，松手转层\n仅在可视面四角显示小手与淡色滑动轨迹\n中间方块也可滑动，不提供还原答案"
+    },
+    {
+      "name": "turn_sound",
+      "value": "转动音效"
+    },
+    {
+      "name": "turn_sound_help",
+      "value": "让每次落位，都有回应"
+    },
+    {
+      "name": "haptic_feedback",
+      "value": "触感反馈"
+    },
+    {
+      "name": "haptic_help",
+      "value": "细腻振感 · 需要设备支持"
+    },
+    {
+      "name": "about_name",
+      "value": "酷比魔方"
+    },
+    {
+      "name": "about_tagline",
+      "value": "轻一点，专注一点。"
+    },
+    {
+      "name": "about_description",
+      "value": "轻量三维魔方，随时开启。所有计算与成绩都留在本机，无广告，也无需联网。"
+    }
   ]
 }

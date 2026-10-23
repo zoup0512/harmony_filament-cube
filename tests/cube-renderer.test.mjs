@@ -330,8 +330,8 @@ for (const order of [2, 3, 4, 5]) {
         const { startX, startY, endX, endY } = guide;
         assert.ok([startX, startY, endX, endY].every(Number.isFinite));
         assert.ok(Math.abs(Math.hypot(endX - startX, endY - startY) - 55) < 1e-7);
-        assert.ok(Math.min(startX, endX) >= 10 && Math.max(startX, endX) <= width - 10);
-        assert.ok(Math.min(startY, endY) >= 10 && Math.max(startY, endY) <= height - 10);
+        assert.ok(Math.min(startX, endX) >= 26 && Math.max(startX, endX) <= width - 26);
+        assert.ok(Math.min(startY, endY) >= 26 && Math.max(startY, endY) <= height - 26);
         const hit = envelopeHit(startX, startY, order, yaw, pitch);
         assert.ok(hit);
         assert.equal(hit.layer[axes.indexOf(axis)], layer);
@@ -355,7 +355,7 @@ for (const order of [2, 3, 4, 5]) {
     }
     assert.ok(unavailable > 0, 'edge-on or hidden targets return null instead of incorrect guidance');
     assert.equal(snapshot(model), before);
-    t.diagnostic(`${count} validated guide arrows, ${unavailable} explicit rotate-view fallbacks`);
+    t.diagnostic(`${count} validated swipe guides, ${unavailable} explicit rotate-view fallbacks`);
   });
 
   test(`${order}x${order}: seams and outer box edges hit with clamped layers`, () => {
@@ -449,7 +449,7 @@ test('Android score and ambiguity gates reject diagonals, including two high-sco
   assert.ok(lowScore > 0 && ambiguous > 0 && accepted > 0);
 });
 
-test('beginner arrows fit stickers and match reversible row/column gestures across views', () => {
+test('beginner gestures stay on visible face corners and match row/column swipes across views', () => {
   let checked = 0;
   for (const order of [2, 3, 4, 5]) {
     const model = seededModel(order);
@@ -460,23 +460,32 @@ test('beginner arrows fit stickers and match reversible row/column gestures acro
           const renderer = new CubeRenderer();
           renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch);
           const guides = renderer.getBeginnerGuides();
+          const markedFaces = new Map();
+          const starts = new Set();
           for (const guide of guides) {
             const { startX: x, startY: y } = guide;
             const dx = guide.endX - x;
             const dy = guide.endY - y;
             const radius = Math.hypot(dx, dy);
-            assert.ok(radius >= 5.5 - 1e-9 && radius <= 12 + 1e-9);
+            assert.ok(radius >= 4.5 - 1e-9 && radius <= 16 + 1e-9);
             const hit = renderer.boxHit(x, y);
             assert.ok(hit);
             const face = renderer.faces.find(f => f.sticker.length === 4 &&
               axes.every(axis => f[axis] === hit[axis] && f.normal[axis] === hit.normal[axis]));
-            assert.ok(face, 'marker must start on a visible sticker');
+            assert.ok(face, 'gesture must start on a visible sticker');
+            assert.ok(axes.every(axis => face[axis] === 0 || face[axis] === order - 1),
+              'never place a gesture on an edge-middle or face-center sticker');
+            const key = vectorKey(face.normal).join(',');
+            markedFaces.set(key, (markedFaces.get(key) ?? 0) + 1);
+            const start = [x, y].join(',');
+            assert.ok(!starts.has(start), 'one gesture per corner sticker, no crossing symbols');
+            starts.add(start);
             for (let j = 0; j < 4; j++) {
               const a = face.sticker[j];
               const b = face.sticker[(j + 1) % 4];
               const clearance = Math.abs((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)) /
                 Math.hypot(b.x - a.x, b.y - a.y);
-              assert.ok(clearance >= radius + 2 - 1e-7, 'shaft, heads and halo must fit inside sticker');
+              assert.ok(clearance >= radius + 1.5 - 1e-7, 'hand and soft swipe trail must fit inside sticker');
             }
             const forward = renderer.pickMove(x, y, x + dx / radius * 55, y + dy / radius * 55, model, yaw, pitch);
             const backward = renderer.pickMove(x, y, x - dx / radius * 55, y - dy / radius * 55, model, yaw, pitch);
@@ -485,11 +494,12 @@ test('beginner arrows fit stickers and match reversible row/column gestures acro
             assert.equal(forward.layer, hit[forward.axis]);
             assert.equal(backward.layer, forward.layer);
             assert.equal(forward.turns, -backward.turns);
-            assert.equal(hit.normal[forward.axis], 0, 'arrows describe tangential row/column turns');
+            assert.equal(hit.normal[forward.axis], 0, 'gestures describe tangential row/column turns');
             checked++;
           }
+          assert.ok([...markedFaces.values()].every(count => count <= 4), 'at most four corners per visible face');
           if (yaw === 0.62 && pitch === -0.42) {
-            assert.ok(guides.length > 0, `default view must show beginner arrows for ${order}x${order}`);
+            assert.ok(guides.length > 0, `default view must show beginner gestures for ${order}x${order}`);
           }
         }
       }
@@ -497,6 +507,30 @@ test('beginner arrows fit stickers and match reversible row/column gestures acro
     assert.equal(snapshot(model), before, 'guides must not affect puzzle state or history');
   }
   assert.ok(checked > 1000);
+});
+
+test('front-facing gestures cover exactly four corners on every order and keep both swipe axes', () => {
+  for (const order of [2, 3, 4, 5]) {
+    const model = seededModel(order);
+    const renderer = new CubeRenderer();
+    renderer.draw(new CheckingCanvas(), width, height, model, 0, 0);
+    const guides = renderer.getBeginnerGuides();
+    assert.equal(guides.length, 4, `${order}x${order} front face has four gesture markers`);
+    const coordinates = guides.map(guide => {
+      const hit = renderer.boxHit(guide.startX, guide.startY);
+      return [hit.x, hit.y].join(',');
+    }).sort();
+    assert.deepEqual(coordinates, [[0, 0], [0, order - 1], [order - 1, 0], [order - 1, order - 1]]
+      .map(p => p.join(',')).sort());
+    const directions = new Set(guides.map(guide => {
+      const dx = guide.endX - guide.startX;
+      const dy = guide.endY - guide.startY;
+      const length = Math.hypot(dx, dy);
+      return renderer.pickMove(guide.startX, guide.startY, guide.startX + dx / length * 55,
+        guide.startY + dy / length * 55, model, 0, 0).axis;
+    }));
+    assert.deepEqual([...directions].sort(), ['x', 'y']);
+  }
 });
 
 class GuideCanvas extends CheckingCanvas {
@@ -515,11 +549,52 @@ class GuideCanvas extends CheckingCanvas {
   }
 }
 
+class GestureCanvas extends GuideCanvas {
+  lineCap = 'butt';
+  transform = [1, 0, 0, 1, 0, 0];
+  transforms = [];
+  curves = 0;
+  handFrames = [];
+  stroke() {
+    super.stroke();
+    if (this.strokeStyle === '#6E958A') {
+      this.handFrames.push({ transform: this.transform.slice(), opacity: this.globalAlpha });
+    }
+  }
+  save() {
+    super.save();
+    this.transforms.push([this.transform.slice(), this.lineCap]);
+  }
+  restore() {
+    super.restore();
+    [this.transform, this.lineCap] = this.transforms.pop();
+  }
+  translate(x, y) {
+    const [a, b, c, d, e, f] = this.transform;
+    this.transform = [a, b, c, d, e + a * x + c * y, f + b * x + d * y];
+  }
+  rotate(angle) {
+    const [a, b, c, d, e, f] = this.transform;
+    const s = Math.sin(angle), co = Math.cos(angle);
+    this.transform = [a * co + c * s, b * co + d * s, -a * s + c * co, -b * s + d * co, e, f];
+  }
+  scale(x, y) {
+    const [a, b, c, d, e, f] = this.transform;
+    this.transform = [a * x, b * x, c * y, d * y, e, f];
+  }
+  quadraticCurveTo(...values) {
+    assert.ok(values.every(Number.isFinite));
+    this.curves++;
+    this.vertices++;
+  }
+  closePath() { assert.ok(this.vertices > 0); }
+}
+
 test('beginner overlay restores Canvas and hides stale, animated or unreadably small markers', () => {
   const renderer = new CubeRenderer();
   const model = new CubeModel(3);
   const context = new CheckingCanvas();
-  const overlay = new GuideCanvas();
+  const overlay = new GestureCanvas();
   const move = new CubeMove('x', 0, 1);
   assert.deepEqual(renderer.getBeginnerGuides(), []);
   renderer.draw(context, width, height, model, 0.62, -0.42);
@@ -535,6 +610,11 @@ test('beginner overlay restores Canvas and hides stale, animated or unreadably s
   assert.equal(overlay.stack.length, 0);
   assert.equal(overlay.clears, 0);
   assert.equal(overlay.strokes.length, guides.length * 2);
+  assert.equal(overlay.arcs.length, guides.length * 5, 'soft halo, fading trail, and touch arc');
+  assert.ok(overlay.curves >= guides.length * 8, 'rounded finger silhouettes, not angular arrowheads');
+  assert.equal(overlay.lineCap, 'butt');
+  assert.equal(overlay.transforms.length, 0);
+  assert.deepEqual(overlay.transform, [1, 0, 0, 1, 0, 0], 'gesture transforms cannot leak into the cube');
   assert.deepEqual(geometry(renderer), before);
   for (const progress of [0, 0.5, 1]) {
     renderer.draw(context, width, height, model, 0.62, -0.42, move, progress);
@@ -554,12 +634,116 @@ test('beginner overlay restores Canvas and hides stale, animated or unreadably s
   assert.deepEqual(renderer.getBeginnerGuides(), []);
 });
 
+test('target hand presses, follows the exact swipe, then releases and fades without reversing', () => {
+  const renderer = new CubeRenderer();
+  const model = new CubeModel(3);
+  const before = snapshot(model);
+  renderer.draw(new CheckingCanvas(), width, height, model, 0.62, -0.42);
+  const move = new CubeMove('y', 1, 1);
+  const guide = renderer.getSwipeGuide(move);
+  assert.ok(guide);
+  const dx = guide.endX - guide.startX;
+  const dy = guide.endY - guide.startY;
+  const length = Math.hypot(dx, dy);
+  let previous = -1;
+  const frames = [];
+  for (const progress of [0, 0.1, 0.16, 0.3, 0.45, 0.6, 0.74, 0.8, 0.88, 0.95]) {
+    const ctx = new GestureCanvas();
+    renderer.drawGuide(ctx, guide, progress);
+    assert.equal(ctx.handFrames.length, 1, 'one hand, no competing markers');
+    const frame = ctx.handFrames[0];
+    const [a, b, c, d, e, f] = frame.transform;
+    const tip = { x: e - c * 0.67, y: f - d * 0.67 };
+    const fraction = ((tip.x - guide.startX) * dx + (tip.y - guide.startY) * dy) / length ** 2;
+    assert.ok(Math.abs((tip.x - guide.startX) * dy - (tip.y - guide.startY) * dx) < 1e-7);
+    assert.ok(fraction >= previous - 1e-8 && fraction <= 1 + 1e-8, 'never demonstrate an inverse swipe on reset');
+    previous = fraction;
+    if (progress <= 0.16) assert.ok(Math.abs(fraction) < 1e-8, 'pause at the exact start sticker');
+    if (progress >= 0.74) assert.ok(Math.abs(fraction - 1) < 1e-8, 'release only after reaching the endpoint');
+    for (const px of [-0.55, 0.75]) {
+      for (const py of [-0.75, 0.78]) {
+        const x = a * px + c * py + e, y = b * px + d * py + f;
+        assert.ok(x >= 0 && x <= width && y >= 0 && y <= height, 'the hand stays on Canvas');
+      }
+    }
+    frames.push(frame);
+    assert.equal(ctx.stack.length, 0);
+    assert.equal(ctx.clears, 0);
+    assert.deepEqual(ctx.transform, [1, 0, 0, 1, 0, 0]);
+  }
+  assert.ok(frames.at(-1).opacity < frames[0].opacity * 0.1, 'hand fades out at release');
+  for (const phase of [0.96, 1, 2]) {
+    const ctx = new GestureCanvas();
+    renderer.drawGuide(ctx, guide, phase);
+    assert.equal(ctx.handFrames.length, 0, 'brief empty pause before the next cycle');
+    assert.equal(ctx.strokes.length, 0);
+  }
+  for (const phase of [-1, NaN, Infinity]) {
+    const ctx = new GestureCanvas();
+    renderer.drawGuide(ctx, guide, phase);
+    assert.deepEqual(ctx.handFrames[0], frames[0], 'invalid or negative progress uses the safe start pose');
+  }
+  assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
+    model, 0.62, -0.42)), moveKey(move));
+  assert.equal(snapshot(model), before);
+});
+
+test('tutorial guide draws only the hand without a trail, endpoint markers or touch halo', () => {
+  const renderer = new CubeRenderer();
+  renderer.draw(new CheckingCanvas(), width, height, new CubeModel(3), 0.62, -0.42);
+  const guide = renderer.getSwipeGuide(new CubeMove('y', 1, 1));
+  assert.ok(guide);
+  for (const progress of [0, 0.1, 0.45, 0.74, 0.88, 0.95, 0.96, 1]) {
+    const tutorial = new GestureCanvas();
+    const history = new GestureCanvas();
+    renderer.drawGuide(tutorial, guide, progress, false);
+    renderer.drawGuide(history, guide, progress);
+    assert.deepEqual(tutorial.handFrames, history.handFrames, 'hand animation and fade stay unchanged');
+    assert.deepEqual(tutorial.arcs, [], 'no start/end circles or fingertip halo');
+    assert.equal(tutorial.fills, progress < 0.96 ? 1 : 0, 'only the hand silhouette is filled');
+    assert.deepEqual(tutorial.strokes, progress < 0.96 ? ['#6E958A'] : [], 'only the hand outline is stroked');
+    if (progress < 0.96) assert.equal(history.arcs.length, 3, 'history guidance retains its existing trail');
+    assert.equal(tutorial.stack.length, 0);
+    assert.equal(tutorial.clears, 0);
+    assert.deepEqual(tutorial.transform, [1, 0, 0, 1, 0, 0]);
+  }
+});
+
+test('moving hands stay inside small canvases for each order, face and turn direction', () => {
+  let checked = 0;
+  for (const order of [2, 3, 4, 5]) {
+    const model = seededModel(order);
+    const renderer = new CubeRenderer();
+    for (const [w, h] of [[210, 250], [280, 240]]) {
+      for (const [yaw, pitch] of [[0.62, -0.42], [-0.8, 0.73], [2.6, -1.3]]) {
+        renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch);
+        for (const axis of axes) for (const layer of [0, order - 1]) for (const turn of [-1, 1]) {
+          const guide = renderer.getSwipeGuide(new CubeMove(axis, layer, turn));
+          if (guide === null) continue;
+          for (const phase of [0, 0.45, 0.8, 0.94]) {
+            const ctx = new GestureCanvas();
+            renderer.drawGuide(ctx, guide, phase);
+            const [a, b, c, d, e, f] = ctx.handFrames[0].transform;
+            for (const px of [-0.55, 0.75]) for (const py of [-0.75, 0.78]) {
+              const x = a * px + c * py + e, y = b * px + d * py + f;
+              assert.ok(x >= 0 && x <= w && y >= 0 && y <= h,
+                `${order}x${order} ${axis}/${layer}/${turn}, phase ${phase} must not clip the hand`);
+            }
+            checked++;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 500);
+});
+
 test('guide cache lifetime, invalidation, logical units, overlay and Canvas restoration', () => {
   const renderer = new CubeRenderer();
   const model = new CubeModel(3);
   const move = new CubeMove('y', 1, 1);
   const context = new CheckingCanvas();
-  const overlay = new GuideCanvas();
+  const overlay = new GestureCanvas();
   assert.equal(renderer.getSwipeGuide(move), null, 'must draw first');
   for (const [w, h] of [[210, 250], [420, 500], [840, 1000]]) {
     renderer.draw(context, w, h, model, 0, 0);
@@ -577,7 +761,9 @@ test('guide cache lifetime, invalidation, logical units, overlay and Canvas rest
     assert.equal(overlay.clears, 0, 'overlay must not erase cube');
     assert.deepEqual(geometry(renderer), before);
     assert.deepEqual(overlay.arcs.at(-1), [guide.startX, guide.startY, 7]);
-    assert.deepEqual(overlay.strokes.slice(-3), ['#FFFFFF', '#1677FF', '#FFFFFF']);
+    assert.deepEqual(overlay.strokes.slice(-5), ['#FFFFFF', '#82B5A4', '#82B5A4', '#82B5A4', '#6E958A']);
+    assert.equal(overlay.lineCap, 'butt');
+    assert.deepEqual(overlay.transform, [1, 0, 0, 1, 0, 0]);
     assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY, model, 0, 0)), moveKey(move));
   }
   assert.equal(renderer.getSwipeGuide(new CubeMove('z', 1, 1)), null, 'normal axis is unreachable head-on');

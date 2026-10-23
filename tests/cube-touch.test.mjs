@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
+import { resourceManager } from './resource-helper.mjs';
 
 const sourceUrl = new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url);
 const source = readFileSync(sourceUrl, 'utf8');
@@ -16,7 +17,7 @@ function member(name) {
 }
 const names = ['touch', 'invalidateGesture', 'layerGestureCurrent', 'setTouchOrigin',
   'moveOrbit', 'judgeScrollGesture', 'animate', 'resetSession', 'onForegroundChanged',
-  'undo', 'aboutToDisappear'];
+  'undo', 'aboutToDisappear', 'guideTarget', 'resetGuide', 'tr', 'setHint'];
 const fields = source.match(/^struct Index \{\r?\n([\s\S]*?)(?=^  aboutToAppear\()/m);
 assert.ok(fields, 'production field defaults must be extractable');
 const declarations = fields[1].replace(/@\w+(?:\([^\r\n)]*\))?\s*/g, '');
@@ -37,6 +38,7 @@ function harness({ hit = true, busy = false, page = 'game', pickedMove = new Cub
   const calls = { hitTest: [], pickMove: [], requestMove: [], draw: [], timers: [], release: [] };
   const state = Object.assign(new TouchHarness(), {
     page, busy, moves: 7,
+    getUIContext: () => ({ getHostContext: () => ({ resourceManager: resourceManager() }) }),
     renderer: {
       hitTest(...args) { calls.hitTest.push(args); return hit; },
       pickMove(...args) { calls.pickMove.push(args); return pickedMove; }
@@ -292,6 +294,62 @@ for (const hit of [true, false]) {
     });
   }
 }
+for (const kind of ['tutorial', 'history']) {
+  test(`${kind} hand is erased only on first Down; partial Up keeps touch ownership until final release`, () => {
+    const h = harness();
+    const target = new CubeMove('x', 1, 1);
+    if (kind === 'tutorial') {
+      h.state.phase = 'tutorial';
+      h.state.lesson = [target];
+    } else {
+      h.state.hintMove = target;
+    }
+    h.state.guideAt = 500;
+    h.state.guideHidden = true;
+    const first = start(h);
+    assert.equal(h.calls.draw.length, 1, 'erase the target hand synchronously on first Down');
+    assert.equal(h.state.guideAt, -1);
+    assert.equal(h.state.guideHidden, false);
+    const second = point(11, 200, 160);
+    h.send(TouchType.Down, [first, second], [second]);
+    assert.equal(h.calls.draw.length, 1, 'additional fingers do not add target redraws');
+    h.send(TouchType.Up, [first, second], [second]);
+    assert.equal(h.state.touching, true, 'a remaining finger must keep target guidance paused');
+    assert.equal(h.state.pointerCount, 1);
+    h.send(TouchType.Up, [], [first]);
+    assertReleased(h);
+    assertNoMove(h);
+    assert.equal(h.state.guideAt, -1, 'the next frame must start at the beginning');
+    assert.equal(h.calls.draw.length, 1, 'release leaves restoration to the existing frame timer');
+  });
+}
+
+for (const [page, busy] of [['game', true], ['home', false], ['stats', false], ['settings', false]]) {
+  test(`${page}, busy=${busy}: retained target does not trigger a touch-down repaint`, () => {
+    const h = harness({ page, busy });
+    h.state.hintMove = h.pickedMove;
+    start(h);
+    h.send(TouchType.Cancel);
+    assert.equal(h.calls.draw.length, 0);
+    assertNoMove(h);
+  });
+}
+
+for (const end of [TouchType.Up, TouchType.Cancel]) {
+  test(`no-target ${end === TouchType.Up ? 'Up' : 'Cancel'} resets guidance without adding repaint`, () => {
+    const h = harness();
+    h.state.guideAt = 500;
+    h.state.guideHidden = true;
+    const first = start(h);
+    h.send(end, [], [first]);
+    assert.equal(h.calls.draw.length, 0);
+    assert.equal(h.state.guideAt, -1);
+    assert.equal(h.state.guideHidden, false);
+    assertReleased(h);
+    assertNoMove(h);
+  });
+}
+
 test('initial orphan Move/Up and empty Down cannot start a gesture', () => {
   const h = harness({ hit: false });
   h.send(TouchType.Down);

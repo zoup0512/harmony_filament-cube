@@ -1,4 +1,4 @@
-import { UIAbility } from '@kit.AbilityKit';
+import { UIAbility, Configuration } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CubeTheme } from '../pages/CubeTheme';
@@ -6,6 +6,7 @@ import { CubeTheme } from '../pages/CubeTheme';
 export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     AppStorage.setOrCreate('cubeForeground', true);
+    AppStorage.setOrCreate('cubeLanguage', this.context.config.language ?? '');
     try {
       windowStage.loadContent('pages/Index', (error) => {
         if (error.code) { hilog.error(0x0000, 'RazorCube', 'Page load failed: %{public}s', error.message); }
@@ -21,6 +22,10 @@ export default class EntryAbility extends UIAbility {
         navigationBarContentColor: CubeTheme.ink
       });
     }).catch(() => {});
+  }
+
+  onConfigurationUpdate(configuration: Configuration): void {
+    AppStorage.setOrCreate('cubeLanguage', configuration.language ?? this.context.config.language ?? '');
   }
 
   onForeground(): void {

@@ -9,7 +9,7 @@ const MAX_RECORDS: number = 200;
 export class CubeSettings {
   defaultOrder: number = 3;
   speed: number = 1;
-  sound: boolean = false;
+  sound: boolean = true;
   haptics: boolean = true;
   beginnerGuides: boolean = true;
 }

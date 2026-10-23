@@ -338,10 +338,10 @@ export class CubeRenderer {
           }
           let guide: CubeSwipeGuide = new CubeSwipeGuide(x, y,
             x + 55 * move.turns * tangent.x / length, y + 55 * move.turns * tangent.y / length);
-          // Keep the start circle and arrowhead inside the touchable Canvas.
+          // The hand extends behind its fingertip; keep its whole path on Canvas.
           let canvasMargin: number = Math.min(x, y, this.width - x, this.height - y,
             guide.endX, guide.endY, this.width - guide.endX, this.height - guide.endY);
-          if (canvasMargin < 10) {
+          if (canvasMargin < 26) {
             continue;
           }
           let picked: CubeMove | null = this.pickMove(x, y, guide.endX, guide.endY,
@@ -372,15 +372,18 @@ export class CubeRenderer {
     return best;
   }
 
-  /** Small bidirectional markers stay inside stickers; they are not solution hints. */
+  /** One swipe example per visible corner sticker, not a solution hint. */
   getBeginnerGuides(): CubeSwipeGuide[] {
     const guides: CubeSwipeGuide[] = [];
     const model: CubeModel | null = this.lastModel;
     if (model === null || !this.cacheIsCurrent()) { return guides; }
+    const last: number = model.order - 1;
     const axes: string[] = ['x', 'y', 'z'];
     for (let i: number = 0; i < this.faces.length; i++) {
       const face: CubeVisibleFace = this.faces[i];
-      if (face.sticker.length !== 4) { continue; }
+      if (face.sticker.length !== 4 ||
+        (face.x !== 0 && face.x !== last) || (face.y !== 0 && face.y !== last) ||
+        (face.z !== 0 && face.z !== last)) { continue; }
       let x: number = 0;
       let y: number = 0;
       for (let j: number = 0; j < 4; j++) {
@@ -400,24 +403,30 @@ export class CubeRenderer {
         clearance = Math.min(clearance,
           Math.abs((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)) / edgeLength);
       }
-      const radius: number = Math.min(12, clearance - 2);
-      // Edge-on or tiny stickers cannot carry a readable marker without spilling.
-      if (radius < 5.5) { continue; }
-      for (let j: number = 0; j < axes.length; j++) {
-        const axis: string = axes[j];
+      const radius: number = Math.min(16, clearance - 1.5);
+      // Edge-on or tiny stickers cannot carry a readable gesture without spilling.
+      if (radius < 4.5) { continue; }
+      const tangentAxes: string[] = axes.filter((axis: string): boolean => {
+        return (axis === 'x' ? face.normal.x : (axis === 'y' ? face.normal.y : face.normal.z)) === 0;
+      });
+      const corner: number = (this.layerCoordinate(face.cubie, tangentAxes[0]) === last ? 1 : 0) +
+        (this.layerCoordinate(face.cubie, tangentAxes[1]) === last ? 1 : 0);
+      const center: CubePoint2 = this.project(this.toCamera(face.normal));
+      // Alternate row and column examples, pointing inward rather than off the cube.
+      for (let j: number = 0; j < tangentAxes.length; j++) {
+        const axis: string = tangentAxes[(corner + j) % tangentAxes.length];
         const tangent: CubePoint2 = this.swipeTangent(face.normal, axis);
         const length: number = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
         if (length < 0.0001) { continue; }
-        const ux: number = tangent.x / length;
-        const uy: number = tangent.y / length;
-        const forward: CubeMove | null = this.pickMove(x, y, x + ux * 55, y + uy * 55,
+        const sign: number = tangent.x * (center.x - x) + tangent.y * (center.y - y) >= 0 ? 1 : -1;
+        const ux: number = sign * tangent.x / length;
+        const uy: number = sign * tangent.y / length;
+        const picked: CubeMove | null = this.pickMove(x, y, x + ux * 55, y + uy * 55,
           model, this.lastYaw, this.lastPitch);
-        const backward: CubeMove | null = this.pickMove(x, y, x - ux * 55, y - uy * 55,
-          model, this.lastYaw, this.lastPitch);
-        if (forward === null || backward === null || forward.axis !== axis || backward.axis !== axis ||
-          forward.layer !== this.layerCoordinate(face.cubie, axis) || backward.layer !== forward.layer ||
-          forward.turns !== 1 || backward.turns !== -1) { continue; }
+        if (picked === null || picked.axis !== axis ||
+          picked.layer !== this.layerCoordinate(face.cubie, axis) || picked.turns !== sign) { continue; }
         guides.push(new CubeSwipeGuide(x, y, x + ux * radius, y + uy * radius));
+        break;
       }
     }
     return guides;
@@ -425,74 +434,120 @@ export class CubeRenderer {
 
   drawBeginnerGuides(ctx: CanvasRenderingContext2D): void {
     const guides: CubeSwipeGuide[] = this.getBeginnerGuides();
-    if (guides.length === 0) { return; }
-    ctx.save();
-    ctx.globalAlpha = 0.85;
-    ctx.lineJoin = 'round';
-    // Paint all halos first so intersecting directions share one clean outline.
-    for (let pass: number = 0; pass < 2; pass++) {
-      ctx.strokeStyle = pass === 0 ? '#FFFFFF' : '#173B32';
-      ctx.lineWidth = pass === 0 ? 3.4 : 1.4;
-      for (let i: number = 0; i < guides.length; i++) {
-        const guide: CubeSwipeGuide = guides[i];
-        const dx: number = guide.endX - guide.startX;
-        const dy: number = guide.endY - guide.startY;
-        const length: number = Math.sqrt(dx * dx + dy * dy);
-        const ux: number = dx / length;
-        const uy: number = dy / length;
-        const head: number = Math.min(3.5, length * 0.42);
+    for (let i: number = 0; i < guides.length; i++) {
+      const guide: CubeSwipeGuide = guides[i];
+      const dx: number = guide.endX - guide.startX;
+      const dy: number = guide.endY - guide.startY;
+      const radius: number = Math.sqrt(dx * dx + dy * dy);
+      ctx.save();
+      ctx.translate(guide.startX, guide.startY);
+      ctx.rotate(Math.atan2(dy, dx) + Math.PI / 2);
+      ctx.scale(radius, radius);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.globalAlpha = 0.12;
+      ctx.beginPath();
+      ctx.arc(0, 0, 0.96, 0, Math.PI * 2);
+      ctx.fill();
+      for (let dot: number = 0; dot < 3; dot++) {
+        ctx.globalAlpha = 0.25 + dot * 0.18;
         ctx.beginPath();
-        ctx.moveTo(guide.startX - dx, guide.startY - dy);
-        ctx.lineTo(guide.endX, guide.endY);
-        for (let direction: number = -1; direction <= 1; direction += 2) {
-          const tipX: number = guide.startX + direction * dx;
-          const tipY: number = guide.startY + direction * dy;
-          ctx.moveTo(tipX - direction * ux * head - uy * head * 0.65,
-            tipY - direction * uy * head + ux * head * 0.65);
-          ctx.lineTo(tipX, tipY);
-          ctx.lineTo(tipX - direction * ux * head + uy * head * 0.65,
-            tipY - direction * uy * head - ux * head * 0.65);
-        }
-        ctx.stroke();
+        ctx.arc(-0.72, 0.45 - dot * 0.3, 0.045 + dot * 0.02, 0, Math.PI * 2);
+        ctx.fill();
       }
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 0.065;
+      ctx.beginPath();
+      ctx.arc(0, -0.53, 0.24, Math.PI, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      this.paintHand(ctx, radius);
+      ctx.restore();
     }
-    ctx.restore();
   }
 
-  /** Call after draw(). Does not clear or change the cached scene/touch geometry. */
-  drawGuide(ctx: CanvasRenderingContext2D, guide: CubeSwipeGuide): void {
-    let dx: number = guide.endX - guide.startX;
-    let dy: number = guide.endY - guide.startY;
-    let length: number = Math.sqrt(dx * dx + dy * dy);
+  /** One press/swipe/release cycle. The caller redraws the cube before each frame. */
+  drawGuide(ctx: CanvasRenderingContext2D, guide: CubeSwipeGuide, progress: number = 0,
+    showTrail: boolean = true): void {
+    const dx: number = guide.endX - guide.startX;
+    const dy: number = guide.endY - guide.startY;
+    const length: number = Math.sqrt(dx * dx + dy * dy);
     if (!Number.isFinite(guide.startX) || !Number.isFinite(guide.startY) ||
-      !Number.isFinite(length) || length < 1 || !this.cacheIsCurrent()) {
-      return;
-    }
-    let ux: number = dx / length;
-    let uy: number = dy / length;
+      !Number.isFinite(length) || length < 1 || !this.cacheIsCurrent()) { return; }
+    const phase: number = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+    const travel: number = Math.max(0, Math.min(1, (phase - 0.16) / 0.58));
+    const eased: number = travel * travel * (3 - 2 * travel);
+    const release: number = Math.max(0, Math.min(1, (phase - 0.8) / 0.16));
+    const opacity: number = 1 - release;
+    if (phase >= 0.96) { return; }
+    const x: number = guide.startX + dx * eased;
+    const y: number = guide.startY + dy * eased;
     ctx.save();
-    ctx.globalAlpha = 1;
+    ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    // White halo under the blue shaft and head remains visible on every sticker.
-    for (let pass: number = 0; pass < 2; pass++) {
-      ctx.strokeStyle = pass === 0 ? '#FFFFFF' : '#1677FF';
-      ctx.lineWidth = pass === 0 ? 8 : 4;
+    if (showTrail) {
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 7;
+      ctx.globalAlpha = opacity * 0.3;
       ctx.beginPath();
       ctx.moveTo(guide.startX, guide.startY);
       ctx.lineTo(guide.endX, guide.endY);
-      ctx.moveTo(guide.endX - ux * 12 - uy * 7, guide.endY - uy * 12 + ux * 7);
-      ctx.lineTo(guide.endX, guide.endY);
-      ctx.lineTo(guide.endX - ux * 12 + uy * 7, guide.endY - uy * 12 - ux * 7);
       ctx.stroke();
+      ctx.strokeStyle = '#82B5A4';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = opacity * 0.8;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(guide.startX, guide.startY, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#DDF4E8';
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(guide.endX, guide.endY, 4, 0, Math.PI * 2);
+      ctx.globalAlpha = opacity * 0.45;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 7 + release * 3, 0, Math.PI * 2);
+      ctx.globalAlpha = opacity * 0.23;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
     }
-    ctx.beginPath();
-    ctx.arc(guide.startX, guide.startY, 7, 0, Math.PI * 2);
-    ctx.fillStyle = '#1677FF';
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.stroke();
+    ctx.globalAlpha = opacity * 0.97;
+    ctx.translate(x, y);
+    ctx.rotate(Math.atan2(dy, dx) + Math.PI / 2);
+    const radius: number = 14 + release * 2;
+    ctx.scale(radius, radius);
+    // Anchor the fingertip, not the palm, to the exact touch coordinates.
+    ctx.translate(0, 0.67);
+    this.paintHand(ctx, radius);
     ctx.restore();
+  }
+
+  private paintHand(ctx: CanvasRenderingContext2D, radius: number): void {
+    ctx.beginPath();
+    ctx.moveTo(-0.15, 0.1);
+    ctx.lineTo(-0.15, -0.48);
+    ctx.quadraticCurveTo(-0.15, -0.67, 0, -0.67);
+    ctx.quadraticCurveTo(0.15, -0.67, 0.15, -0.48);
+    ctx.lineTo(0.15, -0.08);
+    ctx.quadraticCurveTo(0.25, -0.2, 0.34, -0.08);
+    ctx.quadraticCurveTo(0.47, -0.15, 0.51, 0.03);
+    ctx.quadraticCurveTo(0.67, 0.02, 0.67, 0.2);
+    ctx.lineTo(0.65, 0.48);
+    ctx.quadraticCurveTo(0.62, 0.7, 0.36, 0.7);
+    ctx.lineTo(0.15, 0.7);
+    ctx.quadraticCurveTo(-0.02, 0.7, -0.14, 0.51);
+    ctx.lineTo(-0.42, 0.16);
+    ctx.quadraticCurveTo(-0.53, 0, -0.4, -0.05);
+    ctx.quadraticCurveTo(-0.31, -0.11, -0.15, 0.1);
+    ctx.closePath();
+    ctx.fillStyle = '#FFFEF7';
+    ctx.fill();
+    ctx.strokeStyle = '#6E958A';
+    ctx.lineWidth = 0.075 + 0.25 / radius;
+    ctx.stroke();
   }
 
   private cacheIsCurrent(allowAnimation: boolean = false): boolean {

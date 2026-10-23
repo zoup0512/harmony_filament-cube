@@ -1,0 +1,10 @@
+-enable-toplevel-obfuscation
+-enable-export-obfuscation
+
+# Module metadata and the page router refer to these entry points.
+-keep-global-name
+EntryAbility
+Index
+
+# Keep property names stable for persisted JSON and ArkUI string callbacks.
+# Keep file names stable for module srcEntry and main_pages routes.

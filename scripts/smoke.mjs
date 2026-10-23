@@ -10,6 +10,19 @@ import { stripTypeScriptTypes } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// This selects expected app resources; it does not change the device language.
+// en, en-US and en-GB all use the app's English fallback resource directory.
+const SMOKE_LOCALE = process.env.SMOKE_LOCALE || 'zh-CN';
+const RESOURCE_LOCALE = /^en(?:[-_](?:US|GB))?$/i.test(SMOKE_LOCALE) ? 'en' : 'base';
+if (RESOURCE_LOCALE === 'base' && !/^zh(?:[-_]CN)?$/i.test(SMOKE_LOCALE)) {
+  throw new Error('SMOKE_LOCALE must be zh-CN, zh, en, en-US or en-GB');
+}
+const readStrings = directory => Object.fromEntries(JSON.parse(readFileSync(join(ROOT,
+  'entry/src/main/resources', directory, 'element/string.json'), 'utf8')).string
+  .map(({ name, value }) => [name, value]));
+const BASE_STRINGS = readStrings('base');
+const ENGLISH_STRINGS = readStrings('en');
+const LOCALE_STRINGS = RESOURCE_LOCALE === 'en' ? ENGLISH_STRINGS : BASE_STRINGS;
 // SMOKE_CASES=order-4,tutorial selects exact case names; unknown names fail before HDC.
 // --check-gestures runs ONLY the real renderer/model checks, without HDC or artifacts.
 const OUT = process.env.SMOKE_OUT ? resolve(process.env.SMOKE_OUT) : join(ROOT, 'verification', 'gestures');
@@ -29,7 +42,7 @@ const WAIT_MS = 15000;
 const COMMAND_MS = 10000;
 const MIN_COMMAND_MS = 2000;
 const summary = {
-  startedAt: new Date().toISOString(), target: TARGET, bundle: BUNDLE,
+  startedAt: new Date().toISOString(), target: TARGET, bundle: BUNDLE, locale: SMOKE_LOCALE,
   outputDirectory: OUT, status: 'running', results: [], artifacts: [], diagnostics: [], actions: [],
   policy: 'Never clear records or app data. Only default order is changed, then restored to 3. Sound, haptics and speed are inspected, not changed.'
 };
@@ -70,6 +83,44 @@ function hdc(args, timeout = COMMAND_MS) {
 }
 const shell = (...args) => hdc(['shell', ...args]);
 const normalize = value => String(value ?? '').replace(/[′’]/g, "'").replace(/\s+/g, ' ').trim();
+function resourcePattern(template) {
+  const positions = [];
+  let pattern = '';
+  let offset = 0;
+  const literal = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const match of normalize(template).matchAll(/%(\d+)\$([sd])/g)) {
+    pattern += literal(normalize(template).slice(offset, match.index));
+    const position = Number(match[1]);
+    const previous = positions.indexOf(position);
+    if (previous >= 0) pattern += `\\${previous + 1}`;
+    else {
+      positions.push(position);
+      pattern += match[2] === 'd' ? '(\\d+)' : '(.*?)';
+    }
+    offset = match.index + match[0].length;
+  }
+  pattern += literal(normalize(template).slice(offset));
+  return { pattern: new RegExp(`^${pattern}$`), positions };
+}
+// Normalize only observed text, never query regexes or raw artifact trees. Full
+// resource-template matches preserve every semantic assertion below in English.
+// "Tutorial" is both the phase and action; use the action's canonical label.
+const OBSERVED_RESOURCES = Object.entries(LOCALE_STRINGS)
+  .filter(([key]) => key !== 'phase_tutorial')
+  .map(([key, template]) => ({ key, ...resourcePattern(template),
+    specificity: normalize(template).replace(/%\d+\$[sd]/g, '').length }))
+  .sort((a, b) => b.specificity - a.specificity);
+function observedText(value, depth = 0) {
+  const text = normalize(value);
+  if (RESOURCE_LOCALE === 'base' || depth > 3 || !text) return text;
+  for (const { key, pattern, positions } of OBSERVED_RESOURCES) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    return normalize(BASE_STRINGS[key].replace(/%(\d+)\$[sd]/g, (_token, position) =>
+      observedText(match[positions.indexOf(Number(position)) + 1], depth + 1)));
+  }
+  return text;
+}
 function bounds(value) {
   const numbers = String(value ?? '').match(/-?\d+(?:\.\d+)?/g)?.map(Number);
   if (!numbers || numbers.length !== 4) return null;
@@ -80,7 +131,7 @@ function flatten(tree, parent = null, list = []) {
   if (!tree || typeof tree !== 'object') return list;
   const a = tree.attributes || {};
   const node = {
-    a, parent, text: normalize(a.text), type: String(a.type || ''), bounds: bounds(a.bounds),
+    a, parent, text: observedText(a.text), rawText: normalize(a.text), type: String(a.type || ''), bounds: bounds(a.bounds),
     enabled: a.enabled === true || a.enabled === 'true',
     visible: a.visible !== false && a.visible !== 'false', children: []
   };
@@ -123,7 +174,7 @@ function dump(timeout = COMMAND_MS) {
   return latest;
 }
 function matches(node, query) {
-  const labels = [node.text, normalize(node.a.originalText), normalize(node.a.description)];
+  const labels = [node.text, observedText(node.a.originalText), observedText(node.a.description)];
   return labels.some(label => query instanceof RegExp ? query.test(label) : label === normalize(query));
 }
 function find(state, query, type) {
@@ -292,9 +343,9 @@ function assertTouchOnly(state) {
   // controls below a scroll boundary is not removal of the twelve face buttons.
   const obsolete = state.nodes.filter(n =>
     (n.type === 'Button' && descendants(n).some(child =>
-      [child.text, normalize(child.a.originalText), normalize(child.a.description)]
+      [child.text, observedText(child.a.originalText), observedText(child.a.description)]
         .some(text => /^[UDLRFB]'?(?:\s*面转动)?$/.test(text)))) ||
-    [n.text, normalize(n.a.originalText), normalize(n.a.description)].some(text => /转面控制|转面按钮/.test(text)));
+    [n.text, observedText(n.a.originalText), observedText(n.a.description)].some(text => /转面控制|转面按钮/.test(text)));
   check(obsolete.length === 0, 'no twelve face buttons or obsolete face-control title/instructions', {
     obsolete: obsolete.map(n => ({ text: n.text, type: n.type, bounds: n.a.bounds }))
   });
@@ -302,9 +353,23 @@ function assertTouchOnly(state) {
     'retains scramble/tutorial/reset/undo/history/view controls');
 }
 function lesson(state) {
-  const text = state.nodes.filter(n => usable(n, state)).map(n => n.text).find(t => /第\s*\d+\s*\/\s*\d+\s*步/.test(t));
-  const match = text?.match(/^第\s*(\d+)\s*\/\s*(\d+)\s*步[：:]\s*沿箭头滑动完成\s*([UDLRFB]'?)[。.]\s*\S/);
-  return match ? { step: Number(match[1]), total: Number(match[2]), face: match[3], text } : null;
+  for (const node of state.nodes.filter(n => usable(n, state))) {
+    const text = node.text;
+    for (const template of [BASE_STRINGS.lesson_step, ENGLISH_STRINGS.lesson_step]) {
+      const { pattern, positions } = resourcePattern(template);
+      const match = normalize(text).match(pattern);
+      if (!match) continue;
+      const argument = position => match[positions.indexOf(position) + 1];
+      const step = Number(argument(1));
+      const total = Number(argument(2));
+      const face = argument(3);
+      if (Number.isSafeInteger(step) && Number.isSafeInteger(total) && step > 0 &&
+        total > 0 && step <= total && /^[UDLRFB]'?$/.test(face)) {
+        return { step, total, face, text };
+      }
+    }
+  }
+  return null;
 }
 
 let geometryApi;
@@ -628,6 +693,8 @@ async function main() {
     check([2, 3, 4, 5].every(n => has(state, `${n} 阶`)), 'statistics includes every order');
     state = await reveal('empty state or real records', s => has(s, /还没有成绩/) || s.nodes.some(n => /\d+ 步 ·/.test(n.text)));
     if (has(state, /还没有成绩/)) {
+      // The title can enter the viewport while the guidance below it stays clipped.
+      state = await reveal('no-records guidance', s => has(s, /打乱魔方并完成还原/));
       check(has(state, /打乱魔方并完成还原/), 'no-records guidance is visible');
       check(button(state, '清空')?.enabled === false, 'clear disabled when no records exist');
       await capture('statistics-empty');

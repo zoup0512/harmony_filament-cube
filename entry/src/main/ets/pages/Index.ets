@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CubeModel, CubeMove } from '../model/CubeModel';
 import { CubeRenderer } from '../render/CubeRenderer';
 import { CubeStore, CubeSettings, SolveRecord } from '../storage/CubeStore';
@@ -18,7 +19,7 @@ struct Index {
   @State private lessonIndex: number = 0;
   @State private lessonTotal: number = 0;
   @State private speed: number = 1;
-  @State private sound: boolean = false;
+  @State private sound: boolean = true;
   @State private haptics: boolean = true;
   @State private beginnerGuides: boolean = true;
   @State private defaultOrder: number = 3;
@@ -28,6 +29,12 @@ struct Index {
   @State private assisted: boolean = false;
   @State private viewportHeight: number = 740;
   @StorageLink('cubeForeground') @Watch('onForegroundChanged') private foreground: boolean = true;
+
+  @StorageLink('cubeLanguage') @Watch('onLanguageChanged') private language: string = '';
+  private textLanguage: string = '';
+  private textCache: Map<string, string> = new Map<string, string>();
+  private hintKey: string = '';
+  private hintArgs: Array<string | number> = [];
 
   private model: CubeModel = new CubeModel(3);
   private renderer: CubeRenderer = new CubeRenderer();
@@ -50,6 +57,8 @@ struct Index {
   private queueKind: string = '';
   private lesson: CubeMove[] = [];
   private hintMove: CubeMove | null = null;
+  private guideAt: number = -1;
+  private guideHidden: boolean = false;
   private startX: number = 0;
   private startY: number = 0;
   private lastX: number = 0;
@@ -91,6 +100,41 @@ struct Index {
     return false;
   }
 
+  private tr(name: string, ...args: Array<string | number>): string {
+    if (this.textLanguage !== this.language) {
+      this.textCache.clear();
+      this.textLanguage = this.language;
+    }
+    if (args.length === 0 && this.textCache.has(name)) { return this.textCache.get(name) as string; }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      const text = context.resourceManager.getStringByNameSync(name, ...args);
+      if (args.length === 0) { this.textCache.set(name, text); }
+      return text;
+    } catch {
+      hilog.error(0x0000, 'CoolCube', 'Unable to load string: %{public}s', name);
+      return '—';
+    }
+  }
+
+  private setHint(name: string = '', ...args: Array<string | number>): void {
+    this.hintKey = name;
+    this.hintArgs = args;
+    this.hint = name.length > 0 ? this.tr(name, ...args) : '';
+  }
+
+  private onLanguageChanged(): void {
+    this.textCache.clear();
+    if (this.hintKey.length > 0) {
+      if (this.hintKey === 'lesson_step' && this.lessonIndex < this.lesson.length) { this.updateLessonHint(); }
+      else if (this.hintKey === 'history_hint' && this.hintMove !== null) {
+        this.setHint('history_hint', this.moveLabel(this.hintMove));
+      }
+      else { this.setHint(this.hintKey, ...this.hintArgs); }
+    }
+    if (this.storageWarning.length > 0) { this.storageWarning = this.tr('storage_unavailable'); }
+  }
+
   private async loadData(): Promise<void> {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
@@ -106,7 +150,7 @@ struct Index {
       this.model.reset(this.order);
       this.draw();
     } catch {
-      this.storageWarning = '本地存储暂不可用，本次仍可游玩。';
+      this.storageWarning = this.tr('storage_unavailable');
     }
     this.loaded = true;
     await this.feedback.prepare(context);
@@ -148,25 +192,47 @@ struct Index {
     }
   }
 
+  private guideTarget(): CubeMove | null {
+    return this.phase === 'tutorial' && this.lessonIndex < this.lesson.length ?
+      this.lesson[this.lessonIndex] : this.hintMove;
+  }
+
+  private resetGuide(): void {
+    this.guideAt = -1;
+    this.guideHidden = false;
+  }
+
   private draw(progress: number = 0): void {
-    if (this.canvasReady) {
-      this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
-        this.model, this.yaw, this.pitch, this.activeMove, progress);
-      if (!this.busy && this.page === 'game') {
-        const target = this.phase === 'tutorial' && this.lessonIndex < this.lesson.length ?
-          this.lesson[this.lessonIndex] : this.hintMove;
-        if (target !== null) {
-          const guide = this.renderer.getSwipeGuide(target);
-          if (guide !== null) { this.renderer.drawGuide(this.context2d, guide); }
-        } else if (this.beginnerGuides) {
-          this.renderer.drawBeginnerGuides(this.context2d);
-        }
-      }
+    if (!this.canvasReady) { this.resetGuide(); return; }
+    this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
+      this.model, this.yaw, this.pitch, this.activeMove, progress);
+    if (this.busy || this.page !== 'game') { this.resetGuide(); return; }
+    const target = this.guideTarget();
+    if (target === null) {
+      this.resetGuide();
+      if (this.beginnerGuides) { this.renderer.drawBeginnerGuides(this.context2d); }
+      return;
     }
+    if (!this.foreground || this.touching) { this.resetGuide(); return; }
+    const guide = this.renderer.getSwipeGuide(target);
+    this.guideHidden = guide === null;
+    if (guide === null) { this.guideAt = -1; return; }
+    const now = Date.now();
+    if (this.guideAt < 0) { this.guideAt = now; }
+    this.renderer.drawGuide(this.context2d, guide, Math.max(0, now - this.guideAt) % 1800 / 1800,
+      this.phase !== 'tutorial');
   }
 
   private frame(): void {
-    if (!this.foreground || !this.busy || this.activeMove === null) { return; }
+    if (!this.foreground) { return; }
+    if (!this.busy) {
+      if (this.canvasReady && this.page === 'game' && !this.touching && this.guideTarget() !== null) {
+        // An offscreen target waits for a view/canvas change instead of repainting nothing.
+        if (!this.guideHidden) { this.draw(); }
+      } else { this.resetGuide(); }
+      return;
+    }
+    if (this.activeMove === null) { return; }
     const duration = this.queueKind === 'scramble' || this.queueKind === 'lessonSetup' ? 65 / this.speed : 220 / this.speed;
     const fraction = Math.min(1, (Date.now() - this.animationAt) / duration);
     this.draw(fraction * fraction * (3 - 2 * fraction));
@@ -186,7 +252,7 @@ struct Index {
     this.busy = false;
     if (this.queueKind === 'scramble') {
       this.phase = 'ready';
-      this.hint = '已打乱。转动第一手开始计时。';
+      this.setHint('scramble_ready');
     } else if (this.queueKind === 'lessonSetup') {
       this.phase = 'tutorial';
       this.updateLessonHint();
@@ -195,7 +261,7 @@ struct Index {
       this.feedback.play(this.sound, this.haptics);
       if (this.lessonIndex >= this.lesson.length) {
         this.phase = 'idle';
-        this.hint = '教程完成！你已经学会滑动转层，试试打乱挑战吧。';
+        this.setHint('lesson_complete');
       } else {
         this.updateLessonHint();
       }
@@ -229,7 +295,7 @@ struct Index {
     this.timeBase = 0;
     this.startedAt = 0;
     this.moves = 0;
-    this.hint = '';
+    this.setHint();
     this.assisted = false;
     this.hintMove = null;
     this.lesson = [];
@@ -260,20 +326,20 @@ struct Index {
   private goHome(): void {
     if (this.page === 'game' && (this.busy || this.phase === 'playing' || this.phase === 'ready' || this.phase === 'tutorial')) {
       this.getUIContext().showAlertDialog({
-        title: '返回首页？',
-        message: '本局进度不会保存，已完成的成绩不受影响。',
-        primaryButton: { value: '继续玩', action: () => {} },
-        secondaryButton: { value: '返回首页', action: () => this.leavePage() }
+        title: this.tr('leave_title'),
+        message: this.tr('leave_message'),
+        primaryButton: { value: this.tr('keep_playing'), action: () => {} },
+        secondaryButton: { value: this.tr('return_home'), action: () => this.leavePage() }
       });
     } else { this.leavePage(); }
   }
 
   private confirmReset(): void {
     this.getUIContext().showAlertDialog({
-      title: '复位魔方？',
-      message: '直接恢复六面同色并清除本局计时。这不是自动求解。',
-      primaryButton: { value: '取消', action: () => {} },
-      secondaryButton: { value: '复位', action: () => this.resetSession() }
+      title: this.tr('reset_title'),
+      message: this.tr('reset_message'),
+      primaryButton: { value: this.tr('cancel'), action: () => {} },
+      secondaryButton: { value: this.tr('reset'), action: () => this.resetSession() }
     });
   }
 
@@ -281,9 +347,9 @@ struct Index {
     if (this.busy) { return; }
     if (this.phase === 'playing' || this.phase === 'tutorial') {
       this.getUIContext().showAlertDialog({
-        title: '重新打乱？', message: '将放弃当前一局，重新开始计时挑战。',
-        primaryButton: { value: '取消', action: () => {} },
-        secondaryButton: { value: '重新打乱', action: () => this.doScramble() }
+        title: this.tr('rescramble_title'), message: this.tr('rescramble_message'),
+        primaryButton: { value: this.tr('cancel'), action: () => {} },
+        secondaryButton: { value: this.tr('rescramble'), action: () => this.doScramble() }
       });
     } else { this.doScramble(); }
   }
@@ -291,7 +357,7 @@ struct Index {
   private doScramble(): void {
     this.resetSession();
     const counts: number[] = [11, 25, 45, 65];
-    this.hint = '正在打乱…';
+    this.setHint('scrambling_hint');
     this.animate(this.model.createScramble(counts[this.order - 2]), 'scramble');
   }
 
@@ -313,7 +379,7 @@ struct Index {
     for (let i = 0; i < faces.length; i++) {
       if (this.sameMove(this.faceMove(faces[i]), move)) { return faces[i]; }
     }
-    return `${move.axis.toUpperCase()} 第 ${move.layer + 1} 层 ${move.turns > 0 ? '+90°' : '−90°'}`;
+    return this.tr('layer_move', move.axis.toUpperCase(), move.layer + 1, move.turns > 0 ? '+90°' : '−90°');
   }
 
   private sameMove(a: CubeMove, b: CubeMove): boolean {
@@ -325,21 +391,21 @@ struct Index {
     if (this.phase === 'tutorial') {
       if (this.lessonIndex < this.lesson.length && this.sameMove(move, this.lesson[this.lessonIndex])) {
         this.animate([move], 'lessonStep');
-      } else { this.toast('请从箭头圆点沿箭头滑动，完成当前教程步骤。'); }
+      } else { this.toast(this.tr('lesson_follow')); }
       return;
     }
     if (this.phase === 'solved') {
       this.phase = 'idle';
-      this.hint = '自由练习。点击“打乱”开始新的计时挑战。';
+      this.setHint('free_practice_hint');
       this.elapsed = 0;
       this.timeBase = 0;
     }
     if (this.phase === 'ready') {
       this.phase = 'playing';
       this.startedAt = Date.now();
-      this.hint = '';
+      this.setHint();
     }
-    if (this.hintMove !== null) { this.hint = ''; }
+    if (this.hintMove !== null) { this.setHint(); }
     this.hintMove = null;
     this.animate([move], 'user');
   }
@@ -350,11 +416,11 @@ struct Index {
     if (move !== null) {
       this.invalidateGesture(true);
       this.moves = this.model.moveCount;
-      this.hint = '';
+      this.setHint();
       this.hintMove = null;
       this.draw();
       if (this.phase === 'playing' && this.model.isSolved()) { this.finishSolve(); }
-    } else { this.toast('还没有可以撤销的操作。'); }
+    } else { this.toast(this.tr('nothing_to_undo')); }
   }
 
   private showHint(): void {
@@ -363,7 +429,8 @@ struct Index {
     if (solution.length > 0) {
       this.assisted = true;
       this.hintMove = solution[0];
-      this.hint = `历史回退参考：${this.moveLabel(solution[0])}，沿箭头滑动；看不到箭头时请转动视角。这是逆向回放，不是最优求解；本局不计入成绩。`;
+      this.resetGuide();
+      this.setHint('history_hint', this.moveLabel(solution[0]));
       this.draw();
     }
   }
@@ -372,9 +439,9 @@ struct Index {
     if (this.busy) { return; }
     if (this.phase === 'playing' || this.phase === 'ready') {
       this.getUIContext().showAlertDialog({
-        title: '开始入门教程？', message: '将结束本局，进入五步还原练习。教程不记成绩。',
-        primaryButton: { value: '取消', action: () => {} },
-        secondaryButton: { value: '开始教程', action: () => this.doLesson() }
+        title: this.tr('lesson_title'), message: this.tr('lesson_message'),
+        primaryButton: { value: this.tr('cancel'), action: () => {} },
+        secondaryButton: { value: this.tr('start_lesson'), action: () => this.doLesson() }
       });
     } else { this.doLesson(); }
   }
@@ -387,39 +454,41 @@ struct Index {
     this.lesson = [];
     for (let i = setup.length - 1; i >= 0; i--) { this.lesson.push(setup[i].inverse()); }
     this.lessonTotal = this.lesson.length;
-    this.hint = '准备五步教程…';
+    this.setHint('lesson_preparing');
     this.animate(setup, 'lessonSetup');
   }
 
   private updateLessonHint(): void {
-    this.hint = `第 ${this.lessonIndex + 1} / ${this.lessonTotal} 步：沿箭头滑动完成 ${this.moveLabel(this.lesson[this.lessonIndex])}。从圆点滑向箭头，松手转层；看不到箭头时，拖动空白或双指转动视角。`;
+    this.resetGuide();
+    this.setHint('lesson_step', this.lessonIndex + 1, this.lessonTotal, this.moveLabel(this.lesson[this.lessonIndex]));
   }
 
   private finishSolve(): void {
     this.elapsed = this.timeBase + Date.now() - this.startedAt;
     this.phase = 'solved';
     if (this.assisted) {
-      this.hint = '还原成功！本局使用了提示，作为练习不记录成绩。';
+      this.setHint('solved_assisted');
       return;
     }
-    this.hint = '还原成功！正在保存成绩…';
+    this.setHint('solved_saving');
     const record = new SolveRecord(this.order, this.elapsed, this.moves);
     const savedSession = this.sessionId;
     this.store.addRecord(record).then(() => {
       this.records = this.store.records.slice();
       if (savedSession === this.sessionId && this.phase === 'solved') {
-        this.hint = '还原成功！成绩已记录。';
+        this.setHint('solved_saved');
       }
     }).catch(() => {
       if (savedSession === this.sessionId && this.phase === 'solved') {
-        this.hint = '还原成功，但本地成绩保存失败。';
+        this.setHint('solved_save_failed');
       } else if (this.phase !== 'solved') {
-        this.toast('上局成绩保存失败。');
+        this.toast(this.tr('previous_save_failed'));
       }
     });
   }
 
   private invalidateGesture(layerOnly: boolean = false): void {
+    this.resetGuide();
     this.gestureVersion++;
     // Model animations invalidate a pending layer, not an orbit on every frame.
     if (layerOnly) {
@@ -537,7 +606,10 @@ struct Index {
         this.blockedTouch = false;
         this.setTouchOrigin(event.touches);
       }
+      const hideGuide = !this.touching && !this.busy && this.page === 'game' && this.guideTarget() !== null;
       this.touching = true;
+      this.resetGuide();
+      if (hideGuide) { this.draw(); }
       return;
     }
     if (event.type !== TouchType.Move) { return; }
@@ -577,16 +649,16 @@ struct Index {
     settings.sound = this.sound;
     settings.haptics = this.haptics;
     settings.beginnerGuides = this.beginnerGuides;
-    this.store.saveSettings(settings).catch(() => this.toast('设置保存失败，请稍后重试。'));
+    this.store.saveSettings(settings).catch(() => this.toast(this.tr('settings_save_failed')));
   }
 
   private clearRecords(): void {
     this.getUIContext().showAlertDialog({
-      title: '清空所有成绩？', message: '此操作不可撤销，设置不会被清除。',
-      primaryButton: { value: '取消', action: () => {} },
-      secondaryButton: { value: '清空成绩', action: () => {
+      title: this.tr('clear_title'), message: this.tr('clear_message'),
+      primaryButton: { value: this.tr('cancel'), action: () => {} },
+      secondaryButton: { value: this.tr('clear_results'), action: () => {
         this.store.clearRecords().then(() => { this.records = []; })
-          .catch(() => this.toast('清空失败，请稍后重试。'));
+          .catch(() => this.toast(this.tr('clear_failed')));
       } }
     });
   }
@@ -595,6 +667,8 @@ struct Index {
     try {
       this.getUIContext().getPromptAction().showToast({ message: message, duration: 2400 });
     } catch {
+      this.hintKey = '';
+      this.hintArgs = [];
       this.hint = message;
     }
   }
@@ -620,12 +694,12 @@ struct Index {
   }
 
   private phaseLabel(): string {
-    if (this.busy && this.queueKind === 'scramble') { return '正在打乱'; }
-    if (this.phase === 'ready') { return '准备开始'; }
-    if (this.phase === 'playing') { return this.assisted ? '辅助练习' : '计时挑战'; }
-    if (this.phase === 'solved') { return '还原成功'; }
-    if (this.phase === 'tutorial') { return '入门教程'; }
-    return '自由练习';
+    if (this.busy && this.queueKind === 'scramble') { return this.tr('phase_scrambling'); }
+    if (this.phase === 'ready') { return this.tr('phase_ready'); }
+    if (this.phase === 'playing') { return this.assisted ? this.tr('phase_assisted') : this.tr('phase_playing'); }
+    if (this.phase === 'solved') { return this.tr('phase_solved'); }
+    if (this.phase === 'tutorial') { return this.tr('phase_tutorial'); }
+    return this.tr('phase_idle');
   }
 
   @Builder
@@ -633,7 +707,7 @@ struct Index {
     Canvas(this.context2d)
       .width('100%')
       .height('100%')
-      .onReady(() => { this.canvasReady = true; this.draw(); })
+      .onReady(() => { this.canvasReady = true; this.resetGuide(); this.draw(); })
       .onAreaChange((_old: Area, area: Area) => {
         this.invalidateGesture();
         this.canvasWidth = Number(area.width);
@@ -641,14 +715,14 @@ struct Index {
         this.draw();
       })
       .onTouch((event: TouchEvent) => this.touch(event))
-      .accessibilityText(`${this.order} 阶魔方，沿表面行或列滑动，松手转动一层。拖动背景或双指拖动旋转视角。`)
+      .accessibilityText(this.tr('cube_accessibility', this.order))
   }
 
   private orderDescription(value: number): string {
-    if (value === 2) { return '轻松入门'; }
-    if (value === 3) { return '经典挑战'; }
-    if (value === 4) { return '进阶探索'; }
-    return '高手进阶';
+    if (value === 2) { return this.tr('order_beginner'); }
+    if (value === 3) { return this.tr('order_classic'); }
+    if (value === 4) { return this.tr('order_advanced'); }
+    return this.tr('order_expert');
   }
 
   private orderSolves(value: number): number {
@@ -656,10 +730,10 @@ struct Index {
   }
 
   @Builder
-  private sectionTitle(kicker: string, title: string) {
+  private sectionTitle(kickerKey: string, titleKey: string) {
     Column({ space: 8 }) {
-      Text(kicker).fontSize(10).fontColor(CubeTheme.green).letterSpacing(2).fontWeight(FontWeight.Medium)
-      Text(title).fontSize(27).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+      Text(this.tr(kickerKey)).fontSize(10).fontColor(CubeTheme.green).letterSpacing(2).fontWeight(FontWeight.Medium)
+      Text(this.tr(titleKey)).fontSize(27).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }
 
@@ -706,71 +780,75 @@ struct Index {
         Row({ space: 10 }) {
           this.brandMark()
           Column({ space: 2 }) {
-            Text('RAZOR CUBE').fontSize(12).letterSpacing(1.5).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-            Text('把专注，交给每一次转动').fontSize(10).fontColor(CubeTheme.secondary)
-          }.alignItems(HorizontalAlign.Start)
+            Text(this.tr('brand_name')).fontSize(12).letterSpacing(1.5).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            Text(this.tr('brand_tagline')).fontSize(10).fontColor(CubeTheme.secondary)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Blank()
           Blank().width(88)
         }.width('100%').height(44)
-        Row({ space: 7 }) {
-          Circle().width(5).height(5).fill(CubeTheme.green)
-          Text('随时开始一场小小的脑力旅行').fontSize(12).fontColor(CubeTheme.secondary)
-        }.width('100%').margin({ top: 4 })
+        Column({ space: 8 }) {
+          Text(this.tr('home_welcome')).fontSize(26).lineHeight(34)
+            .fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).width('100%')
+          Row({ space: 7 }) {
+            Circle().width(5).height(5).fill(CubeTheme.green)
+            Text(this.tr('home_subtitle')).fontSize(12).fontColor(CubeTheme.secondary)
+          }.width('100%')
+        }.width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
         Column({ space: 0 }) {
           Row() {
             Text(`${this.order} × ${this.order} / ${this.orderDescription(this.order)}`)
               .fontSize(11).fontColor(CubeTheme.green).fontWeight(FontWeight.Medium)
             Blank()
-            Text('可交互预览').fontSize(10).fontColor(CubeTheme.secondary)
+            Text(this.tr('interactive_preview')).fontSize(10).fontColor(CubeTheme.secondary)
           }.width('100%').padding({ left: 18, right: 18, top: 15 })
           Stack() {
             this.cubeStage()
           }.width('100%').height(202)
-          Text('拖动魔方，自由探索每一面').fontSize(10).fontColor(CubeTheme.secondary)
+          Text(this.tr('preview_help')).fontSize(10).fontColor(CubeTheme.secondary)
             .padding({ bottom: 14 })
         }.width('100%').backgroundColor(CubeTheme.mint).borderRadius(28).clip(true)
         Column({ space: 12 }) {
           Row() {
-            Text('选择你的挑战').fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            Text(this.tr('choose_challenge')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
             Blank()
             Text('02 — 05').fontSize(10).fontColor(CubeTheme.muted).letterSpacing(1)
           }.width('100%')
           Row({ space: 8 }) {
             ForEach(this.orders, (value: number) => {
-              Button(`${value} 阶`, { type: ButtonType.Normal })
+              Button(this.tr('order_label', value), { type: ButtonType.Normal })
                 .layoutWeight(1).height(48).borderRadius(16).fontSize(16).fontWeight(FontWeight.Medium)
                 .backgroundColor(this.order === value ? CubeTheme.ink : CubeTheme.surface)
                 .fontColor(this.order === value ? CubeTheme.accent : CubeTheme.secondary)
                 .border({ width: 1, color: this.order === value ? CubeTheme.ink : CubeTheme.line, radius: 16 })
-                .accessibilityText(`${value} 阶${this.order === value ? '，已选择' : ''}`)
+                .accessibilityText(this.tr('order_accessibility', value, this.order === value ? this.tr('selected_suffix') : ''))
                 .onClick(() => this.chooseOrder(value))
             })
           }.width('100%')
         }.width('100%')
-        Button('开始游戏  →', { type: ButtonType.Normal }).width('100%').height(56)
+        Button(this.tr('start_game'), { type: ButtonType.Normal }).width('100%').height(56)
           .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Bold)
           .borderRadius(18).enabled(this.loaded).onClick(() => this.startGame())
         Row({ space: 10 }) {
           Button({ type: ButtonType.Normal }) {
             Row({ space: 10 }) {
               this.chartMark(19, CubeTheme.green)
-              Text('成绩统计').fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+              Text(this.tr('statistics')).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
               Blank()
               Text('↗').fontSize(17).fontColor(CubeTheme.secondary)
             }.width('100%').padding(14)
           }.layoutWeight(1).height(52).borderRadius(16).backgroundColor(CubeTheme.surface)
-            .accessibilityText('成绩统计').onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'stats'; })
+            .accessibilityText(this.tr('statistics')).onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'stats'; })
           Button({ type: ButtonType.Normal }) {
             Row({ space: 10 }) {
               SymbolGlyph($r('sys.symbol.gearshape')).fontSize(19).fontColor([CubeTheme.green])
-              Text('偏好设置').fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+              Text(this.tr('settings')).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
               Blank()
               Text('↗').fontSize(17).fontColor(CubeTheme.secondary)
             }.width('100%').padding(14)
           }.layoutWeight(1).height(52).borderRadius(16).backgroundColor(CubeTheme.surface)
-            .accessibilityText('偏好设置').onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'settings'; })
+            .accessibilityText(this.tr('settings')).onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'settings'; })
         }.width('100%')
-        Text(this.storageWarning.length > 0 ? this.storageWarning : '纯粹玩，安心转  ·  无广告 / 离线可玩')
+        Text(this.storageWarning.length > 0 ? this.storageWarning : this.tr('offline_footer'))
           .fontSize(10).fontColor(CubeTheme.secondary).textAlign(TextAlign.Center)
       }.width('100%').constraintSize({ maxWidth: 520 }).padding({ left: 22, right: 22, top: 12, bottom: 22 })
     }.width('100%').height('100%').scrollBar(BarState.Off)
@@ -789,14 +867,14 @@ struct Index {
     }.width(44).height(44).padding(0)
       .backgroundColor(Color.Transparent)
       .id('back-button')
-      .accessibilityText('返回首页').onClick(() => this.goHome())
+      .accessibilityText(this.tr('return_home')).onClick(() => this.goHome())
   }
 
   @Builder
-  private header(title: string, compactBack: boolean = false) {
+  private header(titleKey: string, compactBack: boolean = false) {
     Row({ space: 12 }) {
       this.backButton(compactBack)
-      Text(title).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).layoutWeight(1)
+      Text(this.tr(titleKey)).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).layoutWeight(1)
       Blank().width(88)
     }.width('100%').height(48)
   }
@@ -808,7 +886,7 @@ struct Index {
         Row({ space: 12 }) {
           this.backButton()
           Column({ space: 3 }) {
-            Text(`${this.order} × ${this.order} 魔方`).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            Text(this.tr('cube_title', this.order)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
             Row({ space: 5 }) {
               Circle().width(5).height(5).fill(CubeTheme.green)
               Text(this.phaseLabel()).fontSize(11).fontColor(CubeTheme.green)
@@ -818,12 +896,12 @@ struct Index {
         }.width('100%').height(48)
         Row() {
           Column({ space: 5 }) {
-            Text('用时').fontSize(11).fontColor('#C3D2CA')
+            Text(this.tr('elapsed_time')).fontSize(11).fontColor('#C3D2CA')
             Text(this.formatTime(this.elapsed)).fontFamily('monospace').fontSize(32)
               .fontWeight(FontWeight.Medium).fontColor('#FFFFFF').maxLines(1)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Column({ space: 5 }) {
-            Text('步数').fontSize(11).fontColor('#C3D2CA')
+            Text(this.tr('move_count')).fontSize(11).fontColor('#C3D2CA')
             Text(`${this.moves}`).fontSize(32).fontWeight(FontWeight.Medium).fontColor(CubeTheme.accent)
           }.alignItems(HorizontalAlign.End).constraintSize({ minWidth: 48 })
         }.width('100%').padding({ left: 22, right: 22, top: 16, bottom: 16 })
@@ -832,14 +910,15 @@ struct Index {
           this.cubeStage()
         }.width('100%').height(Math.max(240, Math.min(480, this.viewportHeight - (this.hint.length > 0 ? 450 : 370))))
         Row({ space: 6 }) {
-          Text('箭头示意沿行/列滑动，松手转层（非点击）\n空白或双指转视角')
+          Text(this.guideTarget() !== null ? this.tr('guided_help') :
+            this.tr('gesture_help'))
             .fontSize(10).lineHeight(16).fontColor(CubeTheme.secondary).layoutWeight(1)
-          Button(`箭头 ${this.beginnerGuides ? '开' : '关'}`, { type: ButtonType.Normal })
-            .width(58).height(44).padding({ left: 4, right: 4 }).fontSize(11).borderRadius(12)
+          Button(this.tr('guides_button', this.beginnerGuides ? this.tr('on') : this.tr('off')), { type: ButtonType.Normal })
+            .width(70).height(44).padding({ left: 4, right: 4 }).fontSize(11).borderRadius(12)
             .backgroundColor(this.beginnerGuides ? CubeTheme.mint : CubeTheme.surface).fontColor(CubeTheme.green)
-            .accessibilityText(`新手方向箭头，${this.beginnerGuides ? '已开启' : '已关闭'}`)
+            .accessibilityText(this.tr('guides_accessibility', this.beginnerGuides ? this.tr('on') : this.tr('off')))
             .onClick(() => this.setBeginnerGuides(!this.beginnerGuides))
-          Button('正视角', { type: ButtonType.Normal }).width(58).height(44)
+          Button(this.tr('reset_view'), { type: ButtonType.Normal }).width(58).height(44)
             .padding({ left: 4, right: 4 }).fontSize(11).borderRadius(12)
             .backgroundColor(CubeTheme.surface).fontColor(CubeTheme.green)
             .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
@@ -850,21 +929,21 @@ struct Index {
         }
         Column({ space: 10 }) {
           Row({ space: 8 }) {
-            Button('打乱', { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+            Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
               .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
               .enabled(!this.busy).onClick(() => this.scramble())
-            Button('教程', { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+            Button(this.tr('tutorial'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
               .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).enabled(!this.busy)
               .onClick(() => this.startLesson())
-            Button('复位', { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+            Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
               .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14).onClick(() => this.confirmReset())
           }.width('100%').margin({ top: 4 })
           Row({ space: 12 }) {
-            Button('↶ 撤销', { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
+            Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
               .backgroundColor(Color.Transparent).fontColor(CubeTheme.secondary)
               .enabled(!this.busy && this.moves > 0 && this.phase !== 'tutorial' && this.phase !== 'solved')
               .onClick(() => this.undo())
-            Button('历史提示', { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
+            Button(this.tr('history_help'), { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
               .backgroundColor(Color.Transparent).fontColor(CubeTheme.secondary)
               .enabled(!this.busy && this.phase !== 'tutorial' && this.phase !== 'solved')
               .onClick(() => this.showHint())
@@ -883,16 +962,16 @@ struct Index {
   @Builder
   private statsPage() {
     Column({ space: 22 }) {
-      this.header('成绩统计')
+      this.header('statistics')
       Scroll() {
         Column({ space: 18 }) {
-          this.sectionTitle('PERSONAL BEST', '每一秒，都是新突破。')
+          this.sectionTitle('personal_best', 'stats_tagline')
           Row() {
             Column({ space: 6 }) {
-              Text('已完成挑战').fontSize(12).fontColor('#C3D2CA')
+              Text(this.tr('completed_challenges')).fontSize(12).fontColor('#C3D2CA')
               Row({ space: 8 }) {
                 Text(`${this.records.length}`).fontSize(40).fontWeight(FontWeight.Bold).fontColor(CubeTheme.accent)
-                Text('次').fontSize(13).fontColor('#FFFFFF').margin({ top: 18 })
+                Text(this.tr('solve_unit')).fontSize(13).fontColor('#FFFFFF').margin({ top: 18 })
               }
             }.alignItems(HorizontalAlign.Start)
             Blank()
@@ -901,11 +980,11 @@ struct Index {
           Column({ space: 0 }) {
             ForEach(this.orders, (value: number) => {
               Row({ space: 12 }) {
-                Text(`${value} 阶`).fontSize(14).fontWeight(FontWeight.Bold).fontColor(CubeTheme.green)
+                Text(this.tr('order_label', value)).fontSize(12).fontWeight(FontWeight.Bold).fontColor(CubeTheme.green)
                   .width(48).height(48).textAlign(TextAlign.Center).backgroundColor(CubeTheme.mint).borderRadius(15)
                 Column({ space: 5 }) {
                   Text(this.orderDescription(value)).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                  Text(`${this.orderSolves(value)} 次完成`).fontSize(10).fontColor(CubeTheme.secondary)
+                  Text(this.tr('completed_count', this.orderSolves(value))).fontSize(10).fontColor(CubeTheme.secondary)
                 }.alignItems(HorizontalAlign.Start)
                 Blank()
                 Text(this.bestTime(value)).fontSize(19).fontFamily('monospace').fontWeight(FontWeight.Medium)
@@ -917,39 +996,39 @@ struct Index {
             })
           }.width('100%').padding({ left: 16, right: 16 }).backgroundColor(CubeTheme.surface).borderRadius(24)
           Row() {
-            Text('最近成绩 · 最多显示 20 条').fontSize(12).fontWeight(FontWeight.Medium).fontColor(CubeTheme.secondary)
+            Text(this.tr('recent_results')).fontSize(12).fontWeight(FontWeight.Medium).fontColor(CubeTheme.secondary).layoutWeight(1)
             Blank()
-            Button('清空', { type: ButtonType.Normal }).height(44).fontSize(12).fontColor(CubeTheme.danger)
+            Button(this.tr('clear'), { type: ButtonType.Normal }).height(44).fontSize(12).fontColor(CubeTheme.danger)
               .backgroundColor(Color.Transparent).enabled(this.records.length > 0).onClick(() => this.clearRecords())
           }.width('100%')
           if (this.records.length === 0) {
             Column({ space: 12 }) {
               SymbolGlyph($r('sys.symbol.flag')).fontSize(28).fontColor([CubeTheme.green])
-              Text('还没有成绩').fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-              Text('打乱魔方并完成还原，\n留下你的第一个纪录。')
+              Text(this.tr('no_results')).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+              Text(this.tr('no_results_help'))
                 .fontSize(12).fontColor(CubeTheme.secondary).lineHeight(21).textAlign(TextAlign.Center)
-              Button('开始游戏  →', { type: ButtonType.Normal }).height(46).padding({ left: 28, right: 28 })
+              Button(this.tr('start_game'), { type: ButtonType.Normal }).height(46).padding({ left: 28, right: 28 })
                 .borderRadius(14).backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(13)
                 .onClick(() => this.startGame())
             }.width('100%').padding(24).backgroundColor(CubeTheme.surface).borderRadius(24)
           } else {
             ForEach(this.records.slice(0, 20), (record: SolveRecord) => {
               Row({ space: 14 }) {
-                Text(`${record.order} 阶`).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.green)
+                Text(this.tr('order_label', record.order)).fontSize(12).fontWeight(FontWeight.Medium).fontColor(CubeTheme.green)
                   .width(44).height(44).textAlign(TextAlign.Center).backgroundColor(CubeTheme.mint).borderRadius(12)
                 Column({ space: 5 }) {
                   Text(this.formatTime(record.durationMs)).fontSize(20).fontColor(CubeTheme.ink).fontFamily('monospace')
-                  Text(`${record.moves} 步 · ${this.dateLabel(record.date)}`).fontSize(11).fontColor(CubeTheme.secondary)
+                  Text(this.tr('record_details', record.moves, this.dateLabel(record.date))).fontSize(11).fontColor(CubeTheme.secondary)
                 }.alignItems(HorizontalAlign.Start)
                 Blank()
                 if (this.formatTime(record.durationMs) === this.bestTime(record.order)) {
-                  Text('最佳').fontSize(10).fontColor(CubeTheme.green).padding(7)
+                  Text(this.tr('best')).fontSize(10).fontColor(CubeTheme.green).padding(7)
                     .backgroundColor(CubeTheme.mint).borderRadius(8)
                 }
               }.width('100%').padding(16).backgroundColor(CubeTheme.surface).borderRadius(18)
             })
           }
-          Text('仅保留本机最近 200 条成绩\n教程与使用历史提示的练习不记榜。')
+          Text(this.tr('results_retention'))
             .fontSize(10).fontColor(CubeTheme.secondary).lineHeight(18).textAlign(TextAlign.Center)
         }.width('100%').padding({ bottom: 24 })
       }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
@@ -959,77 +1038,76 @@ struct Index {
   @Builder
   private settingsPage() {
     Column({ space: 22 }) {
-      this.header('偏好设置', true)
+      this.header('settings', true)
       Scroll() {
         Column({ space: 18 }) {
-          this.sectionTitle('MAKE IT YOURS', '你的魔方，你的节奏。')
           Column({ space: 16 }) {
             Row() {
-              Text('默认阶数').fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+              Text(this.tr('default_order')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
               Blank()
-              Text('回到首页即可使用').fontSize(10).fontColor(CubeTheme.secondary)
+              Text(this.tr('default_order_help')).fontSize(10).fontColor(CubeTheme.secondary).layoutWeight(1).textAlign(TextAlign.End)
             }.width('100%')
             Row({ space: 8 }) {
               ForEach(this.orders, (value: number) => {
-                Button(`${value} 阶`, { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(13)
+                Button(this.tr('order_label', value), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(13)
                   .backgroundColor(this.defaultOrder === value ? CubeTheme.ink : CubeTheme.soft)
                   .fontColor(this.defaultOrder === value ? CubeTheme.accent : CubeTheme.secondary)
-                  .accessibilityText(`${value} 阶${this.defaultOrder === value ? '，已选择' : ''}`)
+                  .accessibilityText(this.tr('order_accessibility', value, this.defaultOrder === value ? this.tr('selected_suffix') : ''))
                   .onClick(() => { this.defaultOrder = value; this.order = value; this.saveSettings(); })
               })
             }.width('100%')
           }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
           Column({ space: 14 }) {
             Row() {
-              Text('转动动画').fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+              Text(this.tr('turn_animation')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
               Blank()
               Text(`${this.speed.toFixed(1)}×`).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.green)
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 }).backgroundColor(CubeTheme.mint).borderRadius(10)
             }.width('100%')
             Slider({ value: this.speed, min: 0.5, max: 2, step: 0.1 })
               .selectedColor(CubeTheme.green).trackColor(CubeTheme.line).blockColor(CubeTheme.green)
-              .accessibilityText('转动动画速度，0.5 至 2 倍')
+              .accessibilityText(this.tr('speed_accessibility'))
               .onChange((value: number, mode: SliderChangeMode) => {
                 this.speed = value;
                 if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) { this.saveSettings(); }
               })
             Row() {
-              Text('从容 0.5×').fontSize(11).fontColor(CubeTheme.secondary)
+              Text(this.tr('speed_slow')).fontSize(11).fontColor(CubeTheme.secondary)
               Blank()
-              Text('敏捷 2.0×').fontSize(11).fontColor(CubeTheme.secondary)
+              Text(this.tr('speed_fast')).fontSize(11).fontColor(CubeTheme.secondary)
             }.width('100%')
           }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
           Column({ space: 18 }) {
             Row({ space: 12 }) {
               Column({ space: 5 }) {
-                Text('新手方向箭头').fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                Text('沿行/列滑动，松手转层；非点击\n仅提示操作方向，不提供还原答案')
+                Text(this.tr('beginner_guides')).fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+                Text(this.tr('beginner_guides_help'))
                   .fontSize(11).lineHeight(17).fontColor(CubeTheme.secondary)
               }.alignItems(HorizontalAlign.Start).layoutWeight(1)
               Toggle({ type: ToggleType.Switch, isOn: this.beginnerGuides }).selectedColor(CubeTheme.green)
-                .accessibilityText('新手方向箭头')
+                .accessibilityText(this.tr('beginner_guides'))
                 .onChange((value: boolean) => this.setBeginnerGuides(value))
             }.width('100%')
             Divider().color(CubeTheme.line)
             Row() {
               Column({ space: 5 }) {
-                Text('转动音效').fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                Text('让每次落位，都有回应').fontSize(11).fontColor(CubeTheme.secondary)
-              }.alignItems(HorizontalAlign.Start)
-              Blank()
+                Text(this.tr('turn_sound')).fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+                Text(this.tr('turn_sound_help')).fontSize(11).fontColor(CubeTheme.secondary)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              Blank().width(12)
               Toggle({ type: ToggleType.Switch, isOn: this.sound }).selectedColor(CubeTheme.green)
-                .accessibilityText('转动音效')
+                .accessibilityText(this.tr('turn_sound'))
                 .onChange((value: boolean) => { this.sound = value; this.saveSettings(); })
             }.width('100%')
             Divider().color(CubeTheme.line)
             Row() {
               Column({ space: 5 }) {
-                Text('触感反馈').fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                Text('细腻振感 · 需要设备支持').fontSize(11).fontColor(CubeTheme.secondary)
-              }.alignItems(HorizontalAlign.Start)
-              Blank()
+                Text(this.tr('haptic_feedback')).fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+                Text(this.tr('haptic_help')).fontSize(11).fontColor(CubeTheme.secondary)
+              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+              Blank().width(12)
               Toggle({ type: ToggleType.Switch, isOn: this.haptics }).selectedColor(CubeTheme.green)
-                .accessibilityText('触感反馈')
+                .accessibilityText(this.tr('haptic_feedback'))
                 .onChange((value: boolean) => { this.haptics = value; this.saveSettings(); })
             }.width('100%')
           }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
@@ -1037,11 +1115,11 @@ struct Index {
             Row({ space: 10 }) {
               this.brandMark()
               Column({ space: 3 }) {
-                Text('Razor Cube').fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-                Text('轻一点，专注一点。').fontSize(11).fontColor(CubeTheme.secondary)
+                Text(this.tr('about_name')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+                Text(this.tr('about_tagline')).fontSize(11).fontColor(CubeTheme.secondary)
               }.alignItems(HorizontalAlign.Start)
             }.width('100%')
-            Text('轻量三维魔方，随时开启。所有计算与成绩都留在本机，无广告，也无需联网。')
+            Text(this.tr('about_description'))
               .fontSize(12).fontColor(CubeTheme.secondary).lineHeight(21).width('100%')
           }.width('100%').padding(20).backgroundColor(CubeTheme.mint).borderRadius(24)
         }.width('100%').padding({ bottom: 24 })

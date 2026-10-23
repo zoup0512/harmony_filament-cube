@@ -11,14 +11,15 @@
 - 打乱、撤销、复位、历史提示、五步入门教程。
 - 打乱不计步；打乱后第一手开始计时，六面同色自动结束；后台暂停计时与动画调度。
 - 本地成绩、按阶最佳、最近 20 条展示（最多保留 200 条）、确认后清空。
-- 默认阶数、0.5–2.0× 动画速度、本地转动提示音与可选触感反馈。
+- 默认阶数、0.5–2.0× 动画速度、默认开启的本地转动提示音与可选触感反馈。
 - 元服务系统胶囊区域避让；离线运行，无联网权限。
 
 ### 行为边界与原版差异
 
 - **不是通用魔方求解器。**“历史提示”消除相邻互逆操作后逆向回放本局操作，包含打乱和玩家操作；它不是最短公式。使用提示后本局只作为练习，不计入成绩。
 - **复位不是求解动画**：直接清除本局并重建完成态。
-- 入门教程使用固定五手外层序列，再按逆序显示滑动箭头，不记成绩；原版为随机五手。从圆点滑向箭头即可完成当前步；看不到箭头时拖动空白或双指转动视角。
+- 入门教程使用固定五手外层序列，再按逆序用小手示范滑动，不记成绩；原版为随机五手。教程与历史提示以约 1.8 秒循环演示按下、滑动、松开淡出；教程仅显示移动的小手，不显示轨迹线、起终点或光圈，历史提示保留轨迹；触摸时隐藏示范，结束后从起点重播。看不到小手时拖动空白或双指转动视角。
+- 普通游玩在可视面的四角方块显示静态手势提示，可在游戏页或偏好设置中关闭；中间方块仍可滑动。该提示仅说明操作方式，不影响计时或成绩资格。
 - 选轴参照 Android 的 `axis × faceNormal` 投影，要求匹配分 ≥0.75 且领先次选 ≥0.15。忙碌时单指触碰魔方不触发新操作，背景或双指仍能旋转视角。
 - 视角拖动方向与 Android 对齐，但本版仍使用 yaw/pitch 并限制俯仰 ±1.45rad，不是原版的无限旋转矩阵。
 - 打乱长度沿用 11 / 25 / 45 / 65 个动画动作；本版每个动作都是 ±90°，不含单独的 180° 动作，因此不承诺与原版随机分布一致。
@@ -29,7 +30,7 @@
 
 ## 已验证结果
 
-当前纯手势版本见 [verification/gestures/RESULTS.md](verification/gestures/RESULTS.md)：Debug / Release 构建成功，211 项自动化测试与420项离线箭头坐标检查通过，最终 Release 在 HarmonyOS API 24 模拟器上的92项交互检查通过。真机与上架验证边界在报告中单独列出。此前按钮版报告保留在 `verification/RESULTS.md`，不代表当前界面。
+此前纯手势版本的验证记录见 [verification/gestures/RESULTS.md](verification/gestures/RESULTS.md)：Debug / Release 构建成功，211 项自动化测试与420项离线箭头坐标检查通过，Release 在 HarmonyOS API 24 模拟器上的92项交互检查通过。这份历史报告不覆盖后续的四角手势、小手滑动示范与首页标语调整；新界面仍需设备验收。此前按钮版报告保留在 `verification/RESULTS.md`，同样不代表当前界面。
 
 ## 开发环境
 
@@ -55,6 +56,19 @@
 
 脚本仅在当前进程设置 SDK / Java 环境，并在退出时恢复，不修改系统环境变量。
 
+### Release 混淆与核验
+
+Release 已在 `entry/build-profile.json5` 启用混淆，规则见 `entry/obfuscation-rules.txt`：混淆局部变量、参数、顶层与导出名称，精确保留 `EntryAbility` 和 `Index` 入口；Debug 不启用这些规则。为保持旧设置、成绩 JSON 和 ArkUI 字符串回调兼容，暂不混淆属性名，也不混淆文件名和页面路径。
+
+```powershell
+.\scripts\build.ps1 -Mode release
+node --unhandled-rejections=strict scripts/verify-release-obfuscation.mjs
+```
+
+核验脚本使用 Node.js 24、PowerShell 和 SDK 的 `ark_disasm.exe`，检查最终 HAP 的 Release 标记、真实字节码导出名称、入口、包内敏感文件及已存在的签名包字节码一致性；并执行混淆后的中间代码，验证模型、跨模块渲染与旧数据读写兼容。Preferences 和 Canvas 使用 mock，不操作设备，不代表真机或上架验收。非默认 DevEco 安装位置需同时设置 `$env:DEVECO_HOME`；仅构建时的 `-DevEcoHome` 参数不会传递给独立核验命令。请在 Release 构建后立即核验，Debug 构建会覆盖同名 HAP，核验脚本会拒绝 Debug 包。
+
+混淆映射及源码映射仅保留在本地被忽略的构建目录（如 `entry/build/default/outputs/default/symbol/release/entry-nameCache.json`），用于故障定位，不应随 HAP 分发或公开。验证结果与边界见 [verification/release-obfuscation/RESULTS.md](verification/release-obfuscation/RESULTS.md)。混淆只能提高逆向成本，业务方法名、数据字段、文件路径及部分字符串仍然可见。
+
 仓库仅同步源码、测试、构建脚本与 Markdown 验证报告。`dist/` 安装包、校验文件，以及 `verification/` 下的截图、布局 JSON 和日志均为本地生成产物，已加入 `.gitignore`，需要时重新构建或运行测试生成。
 
 默认产物：
@@ -65,6 +79,14 @@ entry/build/default/outputs/default/entry-default-unsigned.hap
 
 **共享构建配置不包含签名证书、口令或本机绝对路径，默认生成未签名包。** 本地 API 24 模拟器曾接受未签名调试包；这不代表其他设备也能接受。真机、分发和上架需使用你自己的 AppGallery Connect 元服务应用和证书，在 DevEco 的 Signing Configs 中配置签名，且不要提交签名材料。当前包名为 `com.atomicservice.6917619740903087965`，以 `AppScope/app.json5` 为准。本机原签名配置已备份至被忽略的 `.local/build-profile.json5`，不会随 Git 同步。
 
+## 中英文界面
+
+界面随系统 / 应用语言显示：默认资源为中文，`en` 提供通用英文，`en_US` 提供美国英语，其他英语区域（例如 en-GB）使用通用英文。应用名的英文为 **Cool Cube**。未匹配到语言资源时仍按中文默认资源回退。
+
+首页、游戏、统计、设置、确认弹窗、教程与历史提示、错误提示和无障碍标签均使用字符串资源。系统语言配置更新会清除文案缓存，并重新生成当前教程 / 历史提示及存储警告；不重置游戏或修改本地成绩。中英文资源使用相同的 key 与位置占位符（如 `%1$d`、`%2$s`）。
+
+`tests/cube-localization.test.mjs` 检查资源 key、占位符、英文中文残留和语言切换；设备冒烟脚本支持 `SMOKE_LOCALE=en-US` / `en-GB`，该选项只选择断言语言，不修改设备语言；运行前应先将专用测试设备设为对应语言。已在 HUAWEI 畅享 90 Plus（JUY-AL50，HarmonyOS 7.0.0.109，1080×2406）完成英文主流程布局验收，并修复应用存活期间切换语言时页头不刷新的问题；大字体、折叠屏与平板仍待验收。完整验证结果见 [verification/LOCALIZATION.md](verification/LOCALIZATION.md)。
+
 ## 自动化测试
 
 纯逻辑 / 渲染几何 / 持久化测试不需要模拟器和 npm 安装：
@@ -74,11 +96,12 @@ node --unhandled-rejections=strict --test tests/*.test.mjs
 ```
 
 - `cube-model.test.mjs`：各阶各轴各层正逆转、四次复原、整数坐标、整体旋转完成判定、打乱、历史提示收敛、撤销重做与非法输入。
-- `cube-renderer.test.mjs`：2–7 阶、35 个视角、1,296 个动画帧；验证 Android 切向选轴、歧义拒绝、缝隙命中、2,612 个教程箭头回代及动画末态一致性。
+- `cube-renderer.test.mjs`：2–7 阶、35 个视角、1,296 个动画帧；验证 Android 切向选轴、歧义拒绝、缝隙命中、2,612 个滑动指引回代、四角提示分布、小手滑动与淡出、画布边界及动画末态一致性。
 - `cube-store.test.mjs`：损坏数据、安全验证、异步写入顺序、错误传播、记录裁剪及恢复。
 - `cube-feedback.test.mjs`：音频与振动能力独立、准备超时、释放期间迟到资源回收、音效不排队。
 - `cube-touch.test.mjs`：直接提取实际页面触摸方法，验证 Harmony 抬手事件、多指切换、取消、阈值及忙碌保护。
-- `cube-game.test.mjs`：直接提取页面游戏流程，验证计时、动画提交、真实模型完成后保存成绩、辅助/教程不记榜、后台保护及跨局异步回调隔离。
+- `cube-game.test.mjs`：直接提取页面游戏流程，验证计时、动画提交、真实模型完成后保存成绩、辅助/教程不记榜、小手循环与暂停、后台保护及跨局异步回调隔离。
+- `cube-smoke.test.mjs`：验证设备冒烟脚本能从实际教程文案识别步骤与转面，不连接设备。
 
 测试对 `.ets` 文件使用 Node 内置 `stripTypeScriptTypes` 和平台 mock；实验性 API 警告正常。它不替代实际 ArkTS 编译或设备测试。
 
