@@ -43,12 +43,12 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\24790\\.ohos\\config\\default_harmony_filament-cube_zrxsWxxVsRODLlW-QN7bJOSgVTdwybY5FHZ6ZL4dcQQ=.cer",
+          "certpath": "keystore/debug/debug.cer",
           "keyAlias": "debugKey",
           "keyPassword": "0000001B539464471AD6704E1F0D454AEE641834407B62F4F59793F3E84A9644DF313B86BAFFF4005B73D3",
-          "profile": "C:\\Users\\24790\\.ohos\\config\\default_harmony_filament-cube_zrxsWxxVsRODLlW-QN7bJOSgVTdwybY5FHZ6ZL4dcQQ=.p7b",
+          "profile": "keystore/debug/debug.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\24790\\.ohos\\config\\default_harmony_filament-cube_zrxsWxxVsRODLlW-QN7bJOSgVTdwybY5FHZ6ZL4dcQQ=.p12",
+          "storeFile": "keystore/debug/debug.p12",
           "storePassword": "0000001B7B932C25F73C9347DAB0937224541BA732ED07236721B898B2EF0BA2702A0DDDAD774746287EEA"
         }
       },
@@ -56,12 +56,12 @@
         "name": "release",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "keystore/coolcube_release.cer",
+          "certpath": "keystore/release/coolcube_release.cer",
           "keyAlias": "releasekey",
           "keyPassword": "0000001aa954b5e9e47700aa2a1ae840ca0c170306d3d4c3e0b79aa3ba3a562aede3ec8f51653ac5fd47",
-          "profile": "keystore/CoolCube_ProfileRelease.p7b",
+          "profile": "keystore/release/CoolCube_ProfileRelease.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "keystore/CoolCube.p12",
+          "storeFile": "keystore/release/CoolCube.p12",
           "storePassword": "0000001aa954b5e9e47700aa2a1ae840ca0c170306d3d4c3e0b79aa3ba3a562aede3ec8f51653ac5fd47"
         }
       }

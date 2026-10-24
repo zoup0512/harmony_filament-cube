@@ -56,5 +56,9 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Signing material (local only, referenced by build-profile.json5)
-/keystore/
+# Signing material: keystore/release and keystore/debug are versioned in full
+/keystore/*
+!/keystore/release/
+!/keystore/release/**
+!/keystore/debug/
+!/keystore/debug/**
