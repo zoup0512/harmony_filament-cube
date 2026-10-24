@@ -4,9 +4,9 @@
     "type": "entry",
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
-    "deviceTypes": ["phone", "tablet"],
+    "deviceTypes": ["phone"],
     "deliveryWithInstall": true,
-    "installationFree": true,
+    "installationFree": false,
     "pages": "$profile:main_pages",
     "requestPermissions": [{ "name": "ohos.permission.VIBRATE" }],
     "abilities": [

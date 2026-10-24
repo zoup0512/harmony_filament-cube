@@ -126,7 +126,8 @@ test('resource mocks and observation patterns honor reordered and repeated posit
 
 test('English observations preserve actual smoke home, game, metrics, order, dialog and accessibility selectors', () => {
   const api = smokeHarness('en-US');
-  const rawHome = element('', 'Column', {}, [element('Choose your challenge'), element('Play  →', 'Button')]);
+  const strings = resourceStrings('en');
+  const rawHome = element('', 'Column', {}, [element(strings.choose_challenge), element(strings.start_game, 'Button')]);
   assert.equal(api.isHome(layout(api, [rawHome])), true);
   const state = layout(api, [element('4 × 4 Cube'),
     element('', 'Column', {}, [element('Time'), element('00:12.34')]),

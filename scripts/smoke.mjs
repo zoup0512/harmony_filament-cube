@@ -206,7 +206,7 @@ async function tapDialog(title, label) {
   const state = await waitFor(`AlertDialog ${title}: ${label}`, s => Boolean(dialogAction(s, title, label)));
   tapNode(dialogAction(state, title, label), `AlertDialog ${title}: ${label}`);
 }
-const isHome = state => has(state, '选择你的挑战') && Boolean(button(state, /开始游戏/));
+const isHome = state => has(state, '选择你的挑战') && Boolean(button(state, /开始挑战/));
 const isGame = (state, order) => has(state, new RegExp(`^${order}\\s*[×x]\\s*${order}\\s*魔方$`));
 function diagnostic(state) {
   return state?.nodes.filter(n => usable(n, state) && n.text).map(n => ({
@@ -505,7 +505,7 @@ async function restart() {
   shell('aa', 'force-stop', BUNDLE);
   shell('aa', 'start', '-b', BUNDLE, '-a', 'EntryAbility');
   appStarted = true;
-  return waitFor('EntryAbility home loaded', s => isHome(s) && enabledButton(s, /开始游戏/), 25000, 2);
+  return waitFor('EntryAbility home loaded', s => isHome(s) && enabledButton(s, /开始挑战/), 25000, 2);
 }
 async function home() {
   const state = dump();
@@ -520,7 +520,7 @@ async function home() {
 async function game(order = 3) {
   await home();
   await tap(`${order} 阶`);
-  await tap(/开始游戏/);
+  await tap(/开始挑战/);
   const ready = await waitFor(`${order} × ${order} game ready`, s => isGame(s, order) && idleControls(s));
   assertTouchOnly(ready);
   return ready;
@@ -735,7 +735,7 @@ async function main() {
     await capture('home-after-restart-4');
     // Starting without tapping any order proves the persisted default, even if
     // the platform does not expose selected/backgroundColor accessibility data.
-    await tap(/开始游戏/);
+    await tap(/开始挑战/);
     state = await waitFor('persisted default opens 4 × 4', s => isGame(s, 4) && idleControls(s));
     check(isGame(state, 4), 'aa force-stop/start preserves default 4');
     await capture('persisted-game-4');
@@ -767,7 +767,7 @@ try {
       await home();
       await capture('home-restored-3');
       await restart();
-      await tap(/开始游戏/);
+      await tap(/开始挑战/);
       await waitFor('restored persisted default opens 3 × 3', s => isGame(s, 3) && idleControls(s));
       check(true, 'default 3 restoration survives restart');
       await home();

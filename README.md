@@ -1,6 +1,8 @@
-# Razor Cube · HarmonyOS 元服务
+# Razor Cube · HarmonyOS 手机应用
 
-将 Android `app-filament/game-cube` 的离线多阶魔方玩法迁移为 HarmonyOS Stage / ArkTS 元服务。界面使用 ArkUI，三维魔方采用 Canvas 透视投影，不依赖 Android Filament、原生库、网络或第三方运行时包。
+将 Android `app-filament/game-cube` 的离线多阶魔方玩法迁移为 HarmonyOS Stage / ArkTS 手机应用。界面使用 ArkUI，三维魔方采用 Canvas 透视投影，不依赖 Android Filament、原生库、网络或第三方运行时包。
+
+当前 `main` 为安装式手机应用版本。转换前的元服务版本保留在本地分支 `backup/atomic-service-before-mobile-20261024-221700`；本地未提交的签名配置另存于仓库外的私密备份，不随分支提交。
 
 ## 功能
 
@@ -12,7 +14,7 @@
 - 打乱不计步；打乱后第一手开始计时，六面同色自动结束；后台暂停计时与动画调度。
 - 本地成绩、按阶最佳、最近 20 条展示（最多保留 200 条）、确认后清空。
 - 默认阶数、0.5–2.0× 动画速度、默认开启的本地转动提示音与可选触感反馈。
-- 元服务系统胶囊区域避让；离线运行，无联网权限。
+- 安装后从桌面启动，支持手机竖屏；移除元服务胶囊专用占位，保留系统安全区域；离线运行，无联网权限。
 
 ### 行为边界与原版差异
 
@@ -30,6 +32,8 @@
 
 ## 已验证结果
 
+2026-10-24 手机应用转换验证：Debug / Release 编译、打包与本地签名成功；290 项 Node 自动化测试、420 项离线手势坐标检查及 1,381 项 Release 混淆核验通过。已解包核对签名与未签名 Release HAP：`bundleType=app`、`installationFree=false`、`deviceTypes=["phone"]`，签名包与未签名包字节码一致。本次未连接 HarmonyOS 设备，未验证安装、桌面启动、视觉布局、原地升级或正式应用分发；历史设备结果不能替代本次验收。
+
 此前纯手势版本的验证记录见 [verification/gestures/RESULTS.md](verification/gestures/RESULTS.md)：Debug / Release 构建成功，211 项自动化测试与420项离线箭头坐标检查通过，Release 在 HarmonyOS API 24 模拟器上的92项交互检查通过。这份历史报告不覆盖后续的四角手势、小手滑动示范与首页标语调整；新界面仍需设备验收。此前按钮版报告保留在 `verification/RESULTS.md`，同样不代表当前界面。
 
 ## 开发环境
@@ -40,7 +44,8 @@
 - 编译 / target：HarmonyOS **6.1.1 / API 24**。
 - 当前工程 compatible：HarmonyOS **6.1.1 / API 24**（保留现有工程配置）。
 - 构建使用 DevEco 自带 Node、Hvigor、JBR；逻辑测试使用 **Node.js 24**。
-- 元服务配置：`AppScope/app.json5` 的 `bundleType: atomicService`，`entry/src/main/module.json5` 的 `installationFree: true`。
+- 手机应用配置：`AppScope/app.json5` 的 `bundleType: app`；`entry/src/main/module.json5` 的 `installationFree: false`、`deliveryWithInstall: true`、`deviceTypes: ["phone"]`，保留桌面启动入口。
+- 为保持现有应用标识与签名配置兼容，暂保留原包名；包名中的 `atomicservice` 只是命名，不决定应用形态。已有元服务能否原地升级为应用须以设备和分发平台验证为准。
 - 保留当前工程的 `useNormalizedOHMUrl: false` 设置。
 
 ## 构建
@@ -77,7 +82,9 @@ node --unhandled-rejections=strict scripts/verify-release-obfuscation.mjs
 entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
-**共享构建配置不包含签名证书、口令或本机绝对路径，默认生成未签名包。** 本地 API 24 模拟器曾接受未签名调试包；这不代表其他设备也能接受。真机、分发和上架需使用你自己的 AppGallery Connect 元服务应用和证书，在 DevEco 的 Signing Configs 中配置签名，且不要提交签名材料。当前包名为 `com.atomicservice.6917619740903087965`，以 `AppScope/app.json5` 为准。本机原签名配置已备份至被忽略的 `.local/build-profile.json5`，不会随 Git 同步。
+本工程已有 Debug / Release 签名配置，构建会生成未签名包，并在本机签名材料可用时生成 `entry-default-signed.hap`。本次转换保留本地 `build-profile.json5`，不提交其中的本机路径与口令。仓库历史中已有签名材料，不能视为无敏感信息的公开模板；不要继续提交或公开本地口令与备份。
+
+当前包名为 `com.atomicservice.6917619740903087965`，以 `AppScope/app.json5` 为准。真机分发和上架需确认 AppGallery Connect 项目对应 **HarmonyOS 应用**，且证书 / Profile 授权该包名与测试设备；不能仅因本地签名成功就认定原元服务 Profile 可用于应用发布。本地 API 24 模拟器曾接受未签名调试包，这不代表真机也能接受。转换前后的原地升级与数据保留尚需专用设备验证，不应直接卸载个人设备上的旧版来尝试，以免丢失本地成绩。
 
 ## 中英文界面
 
@@ -114,13 +121,13 @@ $hdc = 'C:\Program Files\Huawei\DevEco Studio\sdk\default\openharmony\toolchains
 & $hdc -t 127.0.0.1:5633 shell aa start -a EntryAbility -b com.atomicservice.6917619740903087965
 ```
 
-不要在有多个设备时省略 `-t`，避免误操作其他真机。`scripts/smoke.mjs` 使用 HDC / UI Test 对已安装元服务进行界面冒烟测试，默认仅连接 `127.0.0.1:5633`；可用 `HDC_TARGET` 指定专用测试设备。它会重新启动本应用并操作测试局与偏好设置，不应对正在使用的个人会话运行。运行生成的截图、布局和结果默认保存在本地 `verification/gestures/`，可用 `SMOKE_OUT` 指定其他目录；这些产物不纳入 Git。测试脚本从 `AppScope/app.json5` 读取当前包名。运行前请按 `hdc list targets` 设置实际设备，例如 `$env:HDC_TARGET='127.0.0.1:5559'`，再执行 `node scripts/smoke.mjs`。
+不要在有多个设备时省略 `-t`，避免误操作其他真机。`scripts/smoke.mjs` 使用 HDC / UI Test 对已安装手机应用进行界面冒烟测试，默认仅连接 `127.0.0.1:5633`；可用 `HDC_TARGET` 指定专用测试设备。它会重新启动本应用并操作测试局与偏好设置，不应对正在使用的个人会话运行。运行生成的截图、布局和结果默认保存在本地 `verification/gestures/`，可用 `SMOKE_OUT` 指定其他目录；这些产物不纳入 Git。测试脚本从 `AppScope/app.json5` 读取当前包名。运行前请按 `hdc list targets` 设置实际设备，例如 `$env:HDC_TARGET='127.0.0.1:5559'`，再执行 `node scripts/smoke.mjs`。
 
 ## 结构
 
 ```text
-AppScope/                         元服务应用身份与图标
-entry/src/main/module.json5        元服务入口、设备和权限
+AppScope/                         手机应用身份与图标
+entry/src/main/module.json5        应用入口、手机设备和权限
 entry/src/main/ets/
   entryability/EntryAbility.ets    页面加载与前后台生命周期
   pages/Index.ets                  首页、游戏、统计、设置及游戏流程
@@ -140,7 +147,7 @@ verification/                     本地设备验证证据
 
 ## 待真机验收
 
-- 在符合当前 compatible API 24 的实体设备上验证安装、元服务入口和平台 API。
+- 在符合当前 compatible API 24 的实体手机上验证安装、桌面图标启动、前后台切换和平台 API。
 - 真机音量、静音策略、振动反馈，以及低端机 5 阶动画性能。
-- 大字体、小屏、平板与折叠屏窗口适配。
-- 正式签名、元服务分发入口、AppGallery 审核和实际发布包体限制。
+- 大字体、小屏与折叠屏手机窗口适配；当前设备声明仅包含手机，不声明平板支持。
+- 正式应用签名、原元服务升级兼容性、AppGallery 应用审核与分发。

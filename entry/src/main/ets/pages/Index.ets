@@ -784,7 +784,6 @@ struct Index {
             Text(this.tr('brand_tagline')).fontSize(10).fontColor(CubeTheme.secondary)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Blank()
-          Blank().width(88)
         }.width('100%').height(44)
         Column({ space: 8 }) {
           Text(this.tr('home_welcome')).fontSize(26).lineHeight(34)
@@ -875,7 +874,6 @@ struct Index {
     Row({ space: 12 }) {
       this.backButton(compactBack)
       Text(this.tr(titleKey)).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).layoutWeight(1)
-      Blank().width(88)
     }.width('100%').height(48)
   }
 
@@ -892,7 +890,6 @@ struct Index {
               Text(this.phaseLabel()).fontSize(11).fontColor(CubeTheme.green)
             }
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Blank().width(88)
         }.width('100%').height(48)
         Row() {
           Column({ space: 5 }) {
