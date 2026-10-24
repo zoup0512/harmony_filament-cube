@@ -55,3 +55,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Signing material (local only, referenced by build-profile.json5)
+/keystore/
