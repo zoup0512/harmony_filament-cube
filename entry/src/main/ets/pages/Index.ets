@@ -800,7 +800,7 @@ struct Index {
   @Builder
   private cubeStage() {
     Stack() {
-      Circle().width(206).height(206).fill(Color.Transparent)
+      Circle().width(194).height(194).fill(Color.Transparent)
         .stroke('#CFDDCE').strokeWidth(1).hitTestBehavior(HitTestMode.None)
       Circle().width(158).height(158).fill('#DEE9DA').hitTestBehavior(HitTestMode.None)
       this.cubeCanvas()
