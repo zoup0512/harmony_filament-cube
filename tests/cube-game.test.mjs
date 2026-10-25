@@ -14,7 +14,7 @@ const pageUrl = new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url
 const source = readFileSync(pageUrl, 'utf8');
 const names = [
   'startTimers', 'stopTimers', 'onForegroundChanged', 'draw', 'frame', 'animate',
-  'resetSession', 'chooseOrder', 'startGame', 'leavePage', 'doScramble',
+  'resetSession', 'confirmReset', 'resetStepByStep', 'phaseLabel', 'chooseOrder', 'startGame', 'leavePage', 'doScramble',
   'faceMove', 'moveLabel', 'sameMove', 'requestMove', 'undo', 'showHint',
   'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast',
   'loadData', 'saveSettings', 'setBeginnerGuides', 'guideTarget', 'resetGuide',
@@ -69,7 +69,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   const timers = new Map();
   const calls = {
     draw: [], getSwipeGuide: [], drawGuide: [], drawBeginnerGuides: [],
-    feedback: [], records: [], pending: [], toasts: [], settings: []
+    feedback: [], records: [], pending: [], toasts: [], settings: [], dialogs: []
   };
   const guide = guideVisible ? { startX: 100, startY: 120, endX: 150, endY: 140 } : null;
   class FakeDate extends Date {
@@ -123,7 +123,8 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   state.speed = speed;
   state.getUIContext = () => ({
     getHostContext: () => ({ resourceManager: resources }),
-    getPromptAction: () => ({ showToast: ({ message }) => calls.toasts.push(message) })
+    getPromptAction: () => ({ showToast: ({ message }) => calls.toasts.push(message) }),
+    showAlertDialog: dialog => calls.dialogs.push(dialog)
   });
   state.startGame();
   state.canvasReady = canvasReady;
@@ -208,6 +209,188 @@ async function settle(h, index = 0, success = true) {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+for (const order of [2, 3, 4, 5]) {
+  for (const speed of [0.5, 1, 2]) {
+    test(`${order}x${order} reset reverses history one animated move at a time (${speed}x)`, t => {
+      const h = harness(t, { order, speed, canvasReady: true });
+      const { state: s, clock, calls } = h;
+      s.doScramble();
+      const setup = [s.activeMove, ...s.queue];
+      while (s.busy) completeMove(h, 65 / speed);
+      const expected = new CubeModel(order);
+      for (const move of setup) expected.applyMove(move, false);
+      const user = s.faceMove('U');
+      s.requestMove(user);
+      completeMove(h);
+      expected.applyMove(user);
+      s.requestMove(s.faceMove('F'));
+      completeMove(h);
+      s.undo();
+      s.showHint();
+      s.startTimers();
+      clock.advance(1500);
+      clock.fire(s.clockTimer);
+      assert.ok(s.elapsed > 0);
+      const solution = s.model.getSolution();
+      const before = snapshot(s.model);
+      const previousSession = s.sessionId;
+      const feedbackCount = calls.feedback.length;
+      s.confirmReset();
+      assert.equal(snapshot(s.model), before, 'opening the dialog does not reset');
+      calls.dialogs.at(-1).secondaryButton.action();
+      assert.equal(snapshot(s.model), before, 'confirmation starts an animation, not an instant reset');
+      assert.ok(s.sessionId > previousSession);
+      assert.equal(s.phase, 'resetting');
+      assert.equal(s.phaseLabel(), '正在复位');
+      assert.equal(s.hintKey, 'resetting_hint');
+      assert.equal(s.hintMove, null);
+      assert.equal(s.assisted, true);
+      assert.equal(s.elapsed, 0);
+      assert.equal(s.moves, 0);
+      assert.equal(s.queueKind, 'reset');
+      assert.equal(s.queue.length + 1, solution.length);
+      for (const [index, move] of solution.entries()) {
+        const stepBefore = snapshot(s.model);
+        const active = s.activeMove;
+        s.requestMove(s.faceMove('R'));
+        s.undo();
+        s.showHint();
+        s.resetStepByStep();
+        s.confirmReset();
+        assert.equal(s.activeMove, active, 'busy inputs cannot replace the reset queue');
+        assert.equal(calls.dialogs.length, 1);
+        clock.advance(220 / speed - 1);
+        s.frame();
+        assert.equal(snapshot(s.model), stepBefore, 'model commits only at the end of each turn');
+        assert.equal(calls.draw.at(-1)[6], active);
+        assert.ok(calls.draw.at(-1)[7] > 0 && calls.draw.at(-1)[7] < 1);
+        clock.advance(1);
+        s.frame();
+        expected.applyMove(move, false);
+        if (index < solution.length - 1) {
+          assert.equal(snapshot(s.model), snapshot(expected));
+          const committed = snapshot(s.model);
+          s.frame();
+          assert.equal(snapshot(s.model), committed, 'a repeated frame cannot double-commit');
+        }
+        assert.equal(s.busy, index < solution.length - 1);
+        clock.fire(s.clockTimer);
+        assert.equal(s.elapsed, 0, 'reset animations never run the challenge clock');
+        assert.equal(s.moves, 0);
+        assert.equal(calls.records.length, 0);
+        assert.equal(calls.feedback.length, feedbackCount);
+      }
+      assert.equal(s.model.isSolved(), true);
+      assert.equal(snapshot(s.model), snapshot(new CubeModel(order)));
+      assert.equal(s.model.getSolution().length, 0);
+      assert.equal(s.model.undo(), null);
+      assert.equal(s.phase, 'idle');
+      assert.equal(s.activeMove, null);
+      assert.equal(s.queueKind, '');
+      assert.equal(s.hint, '');
+      assert.equal(s.assisted, false);
+    });
+  }
+}
+
+test('reset confirmation cancels cleanly and rejects busy, background and stale callbacks', t => {
+  const h = harness(t);
+  const { state: s, calls } = h;
+  oneMoveAway(h);
+  const before = snapshot(s.model);
+  s.confirmReset();
+  calls.dialogs.at(-1).primaryButton.action();
+  assert.equal(snapshot(s.model), before);
+  assert.equal(s.busy, false);
+  s.confirmReset();
+  const confirm = calls.dialogs.at(-1).secondaryButton.action;
+  s.requestMove(s.faceMove('U'));
+  const active = s.activeMove;
+  confirm();
+  assert.equal(s.activeMove, active);
+  assert.equal(s.queueKind, 'user');
+  completeMove(h);
+  s.foreground = false;
+  confirm();
+  assert.equal(s.busy, false);
+  s.foreground = true;
+  s.resetSession();
+  oneMoveAway(h);
+  const newGame = snapshot(s.model);
+  confirm();
+  assert.equal(snapshot(s.model), newGame);
+  assert.equal(s.busy, false);
+  s.page = 'home';
+  s.resetStepByStep();
+  s.confirmReset();
+  assert.equal(snapshot(s.model), newGame);
+  assert.equal(calls.dialogs.length, 2);
+});
+
+test('reset of an already solved cube clears history without unnecessary animation', t => {
+  const h = harness(t);
+  const { state: s } = h;
+  s.resetStepByStep();
+  assert.equal(s.busy, false);
+  for (let i = 0; i < 4; i++) {
+    s.requestMove(s.faceMove('R'));
+    completeMove(h);
+  }
+  assert.equal(s.model.isSolved(), true);
+  assert.ok(s.model.getSolution().length > 0);
+  s.resetStepByStep();
+  assert.equal(s.busy, false);
+  assert.equal(s.phase, 'idle');
+  assert.equal(s.moves, 0);
+  assert.equal(s.model.getSolution().length, 0);
+});
+
+test('reset pauses in background and resumes each move without duplicate commits', t => {
+  const h = harness(t);
+  const { state: s, clock } = h;
+  oneMoveAway(h);
+  s.resetStepByStep();
+  clock.advance(100);
+  s.frame();
+  const before = snapshot(s.model);
+  s.foreground = false;
+  s.onForegroundChanged();
+  clock.advance(10_000);
+  s.frame();
+  assert.equal(snapshot(s.model), before);
+  s.foreground = true;
+  s.onForegroundChanged();
+  s.frame();
+  assert.equal(snapshot(s.model), before);
+  completeMove(h);
+  assert.equal(s.model.isSolved(), true);
+  assert.equal(s.phase, 'idle');
+  assertQuiet(h);
+});
+
+test('leaving during reset cancels the remaining moves and clears tutorial state', t => {
+  const h = harness(t);
+  const { state: s, clock } = h;
+  s.doLesson();
+  while (s.busy) completeMove(h, 65);
+  s.resetStepByStep();
+  assert.equal(s.lesson.length, 0);
+  assert.equal(s.lessonIndex, 0);
+  assert.equal(s.lessonTotal, 0);
+  completeMove(h);
+  assert.equal(s.busy, true);
+  s.leavePage();
+  const after = snapshot(s.model);
+  clock.advance(1000);
+  s.frame();
+  assert.equal(snapshot(s.model), after);
+  assert.equal(s.model.isSolved(), true);
+  assert.equal(s.page, 'home');
+  assert.equal(s.busy, false);
+  assert.equal(s.queue.length, 0);
+  assertQuiet(h);
+});
 
 for (const speed of [0.5, 1, 2]) {
   test(`ready starts on first input; commit and count only at animation end (${speed}x)`, t => {
@@ -519,7 +702,8 @@ for (const kind of ['tutorial', 'history']) {
       clock.fire(s.clockTimer);
       assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, progress, kind !== 'tutorial']);
       assert.equal(calls.getSwipeGuide.at(-1)[0], target);
-      assert.equal(calls.draw.at(-1).at(-1), 0, 'guide progress must not animate a cube turn');
+      assert.equal(calls.draw.at(-1)[7], 0, 'guide progress must not animate a cube turn');
+      assert.equal(calls.draw.at(-1)[8], s.cubeZoom);
     }
     assert.equal(calls.draw.length, draws + samples.length);
     assert.equal(calls.drawBeginnerGuides.length, corners);
@@ -821,7 +1005,7 @@ test('each committed lesson step restarts the hand; setup, busy and completed st
   s.draw();
   assert.equal(calls.drawGuide.length, guides, 'completed tutorial has no target hand');
   const draw = calls.draw.at(-1);
-  assert.deepEqual(draw, [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.yaw, s.pitch, null, 0]);
+  assert.deepEqual(draw, [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.yaw, s.pitch, null, 0, s.cubeZoom]);
 });
 
 for (const followHint of [true, false]) {

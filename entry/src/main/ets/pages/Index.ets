@@ -266,6 +266,9 @@ struct Index {
       } else {
         this.updateLessonHint();
       }
+    } else if (this.queueKind === 'reset') {
+      this.resetSession();
+      return;
     } else if (userMove && this.phase === 'playing' && this.model.isSolved()) {
       this.finishSolve();
     }
@@ -339,12 +342,40 @@ struct Index {
   }
 
   private confirmReset(): void {
+    if (this.busy || !this.foreground || this.page !== 'game') { return; }
+    const savedSession = this.sessionId;
     this.getUIContext().showAlertDialog({
       title: this.tr('reset_title'),
       message: this.tr('reset_message'),
       primaryButton: { value: this.tr('cancel'), action: () => {} },
-      secondaryButton: { value: this.tr('reset'), action: () => this.resetSession() }
+      secondaryButton: { value: this.tr('reset'), action: () => {
+        if (savedSession === this.sessionId) { this.resetStepByStep(); }
+      } }
     });
+  }
+
+  private resetStepByStep(): void {
+    if (this.busy || !this.foreground || this.page !== 'game') { return; }
+    const solution = this.model.getSolution();
+    if (this.model.isSolved() || solution.length === 0) {
+      this.resetSession();
+      return;
+    }
+    this.invalidateGesture();
+    this.sessionId++;
+    this.phase = 'resetting';
+    this.elapsed = 0;
+    this.timeBase = 0;
+    this.startedAt = 0;
+    this.moves = 0;
+    this.assisted = true;
+    this.hintMove = null;
+    this.lesson = [];
+    this.lessonIndex = 0;
+    this.lessonTotal = 0;
+    this.setHint('resetting_hint');
+    this.animate(solution, 'reset');
+    this.draw();
   }
 
   private scramble(): void {
@@ -698,6 +729,7 @@ struct Index {
   }
 
   private phaseLabel(): string {
+    if (this.busy && this.queueKind === 'reset') { return this.tr('phase_resetting'); }
     if (this.busy && this.queueKind === 'scramble') { return this.tr('phase_scrambling'); }
     if (this.phase === 'ready') { return this.tr('phase_ready'); }
     if (this.phase === 'playing') { return this.assisted ? this.tr('phase_assisted') : this.tr('phase_playing'); }
@@ -937,7 +969,8 @@ struct Index {
               .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).enabled(!this.busy)
               .onClick(() => this.startLesson())
             Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14).onClick(() => this.confirmReset())
+              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14)
+              .enabled(!this.busy).onClick(() => this.confirmReset())
           }.width('100%').margin({ top: 4 })
           Row({ space: 12 }) {
             Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)

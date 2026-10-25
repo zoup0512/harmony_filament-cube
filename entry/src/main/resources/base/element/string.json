@@ -46,7 +46,15 @@
     },
     {
       "name": "reset_message",
-      "value": "直接恢复六面同色并清除本局计时。这不是自动求解。"
+      "value": "按本局操作历史逐步转动，恢复六面同色并清除计时和步数，不计入成绩。这不是最短解法。"
+    },
+    {
+      "name": "phase_resetting",
+      "value": "正在复位"
+    },
+    {
+      "name": "resetting_hint",
+      "value": "正在按历史逐步复位…"
     },
     {
       "name": "cancel",

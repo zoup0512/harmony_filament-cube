@@ -79,7 +79,7 @@ for (const [key, label, handler] of [
     const block = buttonBlock(key);
     assert.equal(base[key], label);
     assert.ok(block.includes(`.onClick(() => this.${handler}())`));
-    if (key !== 'reset') assert.match(block, /\.enabled\(!this\.busy/);
+    assert.match(block, /\.enabled\(!this\.busy/);
     if (handler === 'undo' || handler === 'showHint') {
       assert.match(block, /this\.phase !== 'tutorial'/);
       assert.match(block, /this\.phase !== 'solved'/);

@@ -46,7 +46,15 @@
     },
     {
       "name": "reset_message",
-      "value": "Restore the solved state and clear the timer. This is not an automatic solve."
+      "value": "Reverse this game's moves step by step to restore the solved state and clear the timer and move count. No score is saved. This is not the shortest solution."
+    },
+    {
+      "name": "phase_resetting",
+      "value": "Resetting"
+    },
+    {
+      "name": "resetting_hint",
+      "value": "Reversing move history step by step…"
     },
     {
       "name": "cancel",
