@@ -17,7 +17,7 @@ test('builds an installable HarmonyOS phone app instead of an atomic service', (
 });
 
 test('preserves the app identity and exported portrait launcher', () => {
-  assert.equal(app.bundleName, 'com.atomicservice.6917619740903087965');
+  assert.equal(app.bundleName, 'com.razor.filament.cube');
   assert.equal(module.mainElement, 'EntryAbility');
   const launcher = module.abilities.find(ability => ability.name === module.mainElement);
   assert.ok(launcher);

@@ -45,7 +45,7 @@
 - 当前工程 compatible：HarmonyOS **6.1.1 / API 24**（保留现有工程配置）。
 - 构建使用 DevEco 自带 Node、Hvigor、JBR；逻辑测试使用 **Node.js 24**。
 - 手机应用配置：`AppScope/app.json5` 的 `bundleType: app`；`entry/src/main/module.json5` 的 `installationFree: false`、`deliveryWithInstall: true`、`deviceTypes: ["phone"]`，保留桌面启动入口。
-- 为保持现有应用标识与签名配置兼容，暂保留原包名；包名中的 `atomicservice` 只是命名，不决定应用形态。已有元服务能否原地升级为应用须以设备和分发平台验证为准。
+- 包名为 `com.razor.filament.cube`（以 `AppScope/app.json5` 为准）。本地 `keystore/` 下的调试与发布 Profile 均绑定旧包名，需在 AppGallery Connect 按新包名重新生成并替换后才能签名安装。
 - 保留当前工程的 `useNormalizedOHMUrl: false` 设置。
 
 ## 构建
@@ -84,7 +84,7 @@ entry/build/default/outputs/default/entry-default-unsigned.hap
 
 本工程已有 Debug / Release 签名配置，构建会生成未签名包，并在本机签名材料可用时生成 `entry-default-signed.hap`。本次转换保留本地 `build-profile.json5`，不提交其中的本机路径与口令。仓库历史中已有签名材料，不能视为无敏感信息的公开模板；不要继续提交或公开本地口令与备份。
 
-当前包名为 `com.atomicservice.6917619740903087965`，以 `AppScope/app.json5` 为准。真机分发和上架需确认 AppGallery Connect 项目对应 **HarmonyOS 应用**，且证书 / Profile 授权该包名与测试设备；不能仅因本地签名成功就认定原元服务 Profile 可用于应用发布。本地 API 24 模拟器曾接受未签名调试包，这不代表真机也能接受。转换前后的原地升级与数据保留尚需专用设备验证，不应直接卸载个人设备上的旧版来尝试，以免丢失本地成绩。
+当前包名为 `com.razor.filament.cube`，以 `AppScope/app.json5` 为准。真机分发和上架需确认 AppGallery Connect 项目对应 **HarmonyOS 应用**，且证书 / Profile 授权该包名与测试设备；不能仅因本地签名成功就认定 Profile 可用于应用发布。本地 API 24 模拟器曾接受未签名调试包，这不代表真机也能接受。包名变更后新包与旧包是不同应用，无法原地升级，也不会继承旧版本的本地成绩。
 
 ## 中英文界面
 
@@ -118,7 +118,7 @@ node --unhandled-rejections=strict --test tests/*.test.mjs
 $hdc = 'C:\Program Files\Huawei\DevEco Studio\sdk\default\openharmony\toolchains\hdc.exe'
 & $hdc list targets
 & $hdc -t 127.0.0.1:5633 install -r entry/build/default/outputs/default/entry-default-unsigned.hap
-& $hdc -t 127.0.0.1:5633 shell aa start -a EntryAbility -b com.atomicservice.6917619740903087965
+& $hdc -t 127.0.0.1:5633 shell aa start -a EntryAbility -b com.razor.filament.cube
 ```
 
 不要在有多个设备时省略 `-t`，避免误操作其他真机。`scripts/smoke.mjs` 使用 HDC / UI Test 对已安装手机应用进行界面冒烟测试，默认仅连接 `127.0.0.1:5633`；可用 `HDC_TARGET` 指定专用测试设备。它会重新启动本应用并操作测试局与偏好设置，不应对正在使用的个人会话运行。运行生成的截图、布局和结果默认保存在本地 `verification/gestures/`，可用 `SMOKE_OUT` 指定其他目录；这些产物不纳入 Git。测试脚本从 `AppScope/app.json5` 读取当前包名。运行前请按 `hdc list targets` 设置实际设备，例如 `$env:HDC_TARGET='127.0.0.1:5559'`，再执行 `node scripts/smoke.mjs`。

@@ -1,8 +1,8 @@
 {
   "app": {
-    "bundleName": "com.atomicservice.6917619740903087965",
+    "bundleName": "com.razor.filament.cube",
     "vendor": "Razor",
-    "versionCode": 1000000,
+    "versionCode": 1,
     "versionName": "1.0.0",
     "icon": "$media:app_icon",
     "label": "$string:app_name",
