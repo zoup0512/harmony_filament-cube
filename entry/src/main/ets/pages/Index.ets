@@ -44,6 +44,7 @@ struct Index {
   private canvasWidth: number = 320;
   private canvasHeight: number = 320;
   private canvasReady: boolean = false;
+  private cubeZoom: number = 1;
   private yaw: number = 0.62;
   private pitch: number = -0.42;
   private frameTimer: number = -1;
@@ -205,7 +206,7 @@ struct Index {
   private draw(progress: number = 0): void {
     if (!this.canvasReady) { this.resetGuide(); return; }
     this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
-      this.model, this.yaw, this.pitch, this.activeMove, progress);
+      this.model, this.yaw, this.pitch, this.activeMove, progress, this.cubeZoom);
     if (this.busy || this.page !== 'game') { this.resetGuide(); return; }
     const target = this.guideTarget();
     if (target === null) {
@@ -313,12 +314,15 @@ struct Index {
     this.resetSession();
     this.yaw = 0.62;
     this.pitch = -0.42;
+    // 1.12 is the largest zoom that never clips the cube at extreme orbit angles.
+    this.cubeZoom = 1.12;
     this.canvasReady = false;
     this.page = 'game';
   }
 
   private leavePage(): void {
     this.resetSession();
+    this.cubeZoom = 1;
     this.canvasReady = false;
     this.page = 'home';
   }

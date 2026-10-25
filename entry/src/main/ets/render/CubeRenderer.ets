@@ -127,7 +127,8 @@ export class CubeRenderer {
   private cachedCoordinates: number[] = [];
 
   draw(ctx: CanvasRenderingContext2D, width: number, height: number, model: CubeModel,
-    yaw: number, pitch: number, move: CubeMove | null = null, progress: number = 0): void {
+    yaw: number, pitch: number, move: CubeMove | null = null, progress: number = 0,
+    zoom: number = 1): void {
     this.faces = [];
     this.lastModel = null;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
@@ -144,7 +145,8 @@ export class CubeRenderer {
     }
     this.width = width;
     this.height = height;
-    this.focal = Math.min(width, height) * 1.48;
+    this.focal = Math.min(width, height) * 1.48 *
+      (Number.isFinite(zoom) ? Math.max(1, zoom) : 1);
     this.lastYaw = yaw;
     this.lastPitch = pitch;
     this.yawCos = Math.cos(yaw);
