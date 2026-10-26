@@ -1,23 +1,27 @@
 # -*- coding: utf-8 -*-
-"""生成酷比魔方 app 图标（1024x1024 PNG，全息渐变背景 + 等距魔方）。
+"""生成棱动魔方 app 图标（1024x1024 PNG，全息渐变背景 + 等距魔方）。
 
 设计还原自 2026-10 上线的全息渐变版图标：左上紫 -> 右下青对角渐变，
-圆角矩形遮罩（透明四角），白描边等距魔方（黄顶/蓝左/红右），半透明白格线。
+白描边等距魔方（黄顶/蓝左/红右），半透明白格线。
+应用单层图须为方角且无透明像素，导出完整方形背景的 RGB PNG。
+商店素材为 1024，应用资源预缩放为 512，避免 SDK 的 1024 缩放引入透明像素。
+默认同步两个尺寸；指定输出路径时只生成 1024 商店素材。
 
-用法: python gen_app_icon.py [输出路径]
+用法: python design/gen_app_icon.py [商店素材输出路径]
 """
 import sys
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-SIZE = 1024          # 最终输出尺寸
+SIZE = 1024          # 商店素材尺寸
+APP_ICON_SIZE = 512  # 应用资源尺寸
 S = 4                # 超采样倍数（抗锯齿）
 W = SIZE * S
 
 # ---- 背景渐变（按现图最小二乘拟合，方向为 (1,1) 对角线）----
 GRAD_TL = (137, 85, 255)
 GRAD_BR = (57, 202, 244)
-CORNER_RADIUS = 230  # 圆角矩形遮罩半径
 
 # ---- 魔方几何（描边中心线，1024 尺度；1.0 为原版占幅）----
 CUBE_SCALE = 1.20
@@ -38,7 +42,7 @@ def clamp(v):
     return max(0, min(255, round(v)))
 
 
-def main(out_path):
+def main(out_path, app_icon_path=None):
     # ---- 背景：沿对角线的线性渐变 ----
     img = Image.new("RGB", (W, W))
     px = img.load()
@@ -107,17 +111,20 @@ def main(out_path):
     img = img.convert("RGBA")
     img.alpha_composite(layer)
 
-    # ---- 圆角矩形遮罩（四角透明）----
-    mask = Image.new("L", (W, W), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, W - 1, W - 1], radius=CORNER_RADIUS * S, fill=255)
-    img.putalpha(mask)
-
     # ---- 缩到 1024 并输出 ----
-    img = img.resize((SIZE, SIZE), Image.LANCZOS)
+    img = img.convert("RGB").resize((SIZE, SIZE), Image.LANCZOS)
     img.save(out_path, "PNG", optimize=True)
     print(f"saved {out_path} ({SIZE}x{SIZE}, cube scale {CUBE_SCALE})")
+    if app_icon_path is not None:
+        app_icon = img.resize((APP_ICON_SIZE, APP_ICON_SIZE), Image.LANCZOS)
+        app_icon.save(app_icon_path, "PNG", optimize=True)
+        print(f"saved {app_icon_path} ({APP_ICON_SIZE}x{APP_ICON_SIZE})")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "app_icon_1024.png")
+    if len(sys.argv) > 1:
+        main(sys.argv[1])
+    else:
+        root = Path(__file__).resolve().parent.parent
+        main(root / "app_icon_1024.png",
+             root / "AppScope/resources/base/media/app_icon.png")

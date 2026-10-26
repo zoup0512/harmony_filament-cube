@@ -79,6 +79,19 @@ for (const scope of scopes) {
   });
 }
 
+test('visible copy uses practice terminology without changing internal resource names', () => {
+  for (const scope of scopes) {
+    for (const locale of locales) {
+      for (const { name, value } of tables[scope][locale]) {
+        assert.doesNotMatch(value, /游戏|遊戲|玩|电玩|手游|\b(?:games?|gaming|gameplay|gamers?|players?|play|playing)\b/i,
+          `${scope}/${locale}: ${name}`);
+      }
+    }
+  }
+  assert.equal(strings.base.keep_playing, '继续练习');
+  assert.equal(strings.en.keep_playing, 'Continue practice');
+});
+
 test('translations preserve positional argument types and repeated placeholders', () => {
   const signature = value => [...new Set(value.match(/%\d+\$[sd]/g) ?? [])].sort();
   for (const [key, value] of Object.entries(strings.base)) {

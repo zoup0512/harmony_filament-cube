@@ -143,11 +143,11 @@ test('English observations preserve actual smoke home, game, metrics, order, dia
   assert.equal(api.enabledButton(state, api.regex('撤销')), true);
   assert.equal(state.nodes.find(n => n.rawText === '4 × 4 Cube').text, '4 × 4 魔方');
   assert.equal(state.tree.children[0].attributes.text, '4 × 4 Cube', 'raw artifact trees stay untouched');
-  const dialog = element('', 'AlertDialog', {}, [element('Return home?'), element('Keep playing'), element('Home'),
+  const dialog = element('', 'AlertDialog', {}, [element('Return home?'), element(strings.keep_playing), element('Home'),
     element(resourceStrings('en').leave_message)]);
   const dialogs = layout(api, [element('Home'), dialog]);
   assert.equal(api.leaveDialogReady(dialogs), true);
   assert.equal(api.dialogAction(dialogs, '返回首页？', '返回首页').rawText, 'Home');
-  assert.equal(api.leaveDialogReady(layout(api, [element('Return home?'), element('Keep playing'), element('Home')])), false,
+  assert.equal(api.leaveDialogReady(layout(api, [element('Return home?'), element(strings.keep_playing), element('Home')])), false,
     'background labels must not substitute for a dialog');
 });

@@ -14,7 +14,7 @@
     },
     {
       "name": "storage_unavailable",
-      "value": "Local storage is unavailable. You can still play this session."
+      "value": "Local storage is unavailable. You can still practice."
     },
     {
       "name": "scramble_ready",
@@ -30,11 +30,11 @@
     },
     {
       "name": "leave_message",
-      "value": "Your current game will not be saved. Completed results will not be affected."
+      "value": "Your current progress will not be saved. Completed results will not be affected."
     },
     {
       "name": "keep_playing",
-      "value": "Keep playing"
+      "value": "Continue practice"
     },
     {
       "name": "return_home",
@@ -46,7 +46,7 @@
     },
     {
       "name": "reset_message",
-      "value": "Reverse this game's moves step by step to restore the solved state and clear the timer and move count. No score is saved. This is not the shortest solution."
+      "value": "Reverse this session's moves step by step to restore the solved state and clear the timer and move count. No result is saved. This is not the shortest solution."
     },
     {
       "name": "phase_resetting",
@@ -70,7 +70,7 @@
     },
     {
       "name": "rescramble_message",
-      "value": "Discard this game and start a new timed challenge."
+      "value": "Discard the current progress and start a new timed challenge."
     },
     {
       "name": "rescramble",
@@ -106,7 +106,7 @@
     },
     {
       "name": "lesson_message",
-      "value": "End this game and start a five-step practice solve. Tutorials do not count toward your results."
+      "value": "End the current session and start a five-step practice solve. Tutorials do not count toward your results."
     },
     {
       "name": "start_lesson",
@@ -262,7 +262,7 @@
     },
     {
       "name": "offline_footer",
-      "value": "Just play. No ads. Fully offline."
+      "value": "Focused practice. No ads. Fully offline."
     },
     {
       "name": "cube_title",

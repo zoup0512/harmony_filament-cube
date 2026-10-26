@@ -6,15 +6,15 @@
     },
     {
       "name": "ability_desc",
-      "value": "酷比魔方"
+      "value": "棱动魔方"
     },
     {
       "name": "EntryAbility_label",
-      "value": "酷比魔方"
+      "value": "棱动魔方"
     },
     {
       "name": "storage_unavailable",
-      "value": "本地存储暂不可用，本次仍可游玩。"
+      "value": "本地存储暂不可用，本次仍可练习。"
     },
     {
       "name": "scramble_ready",
@@ -34,7 +34,7 @@
     },
     {
       "name": "keep_playing",
-      "value": "继续玩"
+      "value": "继续练习"
     },
     {
       "name": "return_home",
@@ -210,7 +210,7 @@
     },
     {
       "name": "brand_name",
-      "value": "酷比魔方"
+      "value": "棱动魔方"
     },
     {
       "name": "brand_tagline",
@@ -262,7 +262,7 @@
     },
     {
       "name": "offline_footer",
-      "value": "纯粹玩，安心转  ·  无广告 / 离线可玩"
+      "value": "专注练习，安心转  ·  无广告 / 离线可用"
     },
     {
       "name": "cube_title",
@@ -418,7 +418,7 @@
     },
     {
       "name": "about_name",
-      "value": "酷比魔方"
+      "value": "棱动魔方"
     },
     {
       "name": "about_tagline",

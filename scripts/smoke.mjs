@@ -200,7 +200,7 @@ function dialogAction(state, title, label) {
   const candidates = texts.length ? texts : nodes.filter(n => n.type === 'Button');
   return candidates.length === 1 ? candidates[0] : null;
 }
-const leaveDialogReady = state => Boolean(dialogAction(state, '返回首页？', '继续玩') &&
+const leaveDialogReady = state => Boolean(dialogAction(state, '返回首页？', BASE_STRINGS.keep_playing) &&
   dialogAction(state, '返回首页？', '返回首页'));
 async function tapDialog(title, label) {
   const state = await waitFor(`AlertDialog ${title}: ${label}`, s => Boolean(dialogAction(s, title, label)));

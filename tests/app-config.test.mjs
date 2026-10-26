@@ -29,6 +29,23 @@ test('preserves the app identity and exported portrait launcher', () => {
   assert.deepEqual(JSON.parse(read('entry/src/main/resources/base/profile/main_pages.json')).src, ['pages/Index']);
 });
 
+test('uses the Chinese app name consistently while preserving the English brand', () => {
+  assert.equal(app.label, '$string:app_name');
+  const launcher = module.abilities.find(ability => ability.name === module.mainElement);
+  assert.equal(launcher.label, '$string:EntryAbility_label');
+  assert.equal(launcher.description, '$string:ability_desc');
+  for (const locale of ['base', 'en', 'en_US']) {
+    const expectedName = locale === 'base' ? '棱动魔方' : 'Cool Cube';
+    const appStrings = JSON.parse(read(`AppScope/resources/${locale}/element/string.json`)).string;
+    assert.equal(appStrings.find(entry => entry.name === 'app_name')?.value, expectedName);
+    const entryStrings = JSON.parse(read(`entry/src/main/resources/${locale}/element/string.json`)).string;
+    for (const key of ['ability_desc', 'EntryAbility_label', 'about_name', 'brand_name']) {
+      const expected = key === 'brand_name' && locale !== 'base' ? 'COOL CUBE' : expectedName;
+      assert.equal(entryStrings.find(entry => entry.name === key)?.value, expected, `${locale}: ${key}`);
+    }
+  }
+});
+
 test('phone conversion does not add permissions or capsule-only header spacing', () => {
   assert.deepEqual(module.requestPermissions, [{ name: 'ohos.permission.VIBRATE' }]);
   assert.doesNotMatch(read('entry/src/main/ets/pages/Index.ets'), /Blank\(\)\.width\(88\)/);
