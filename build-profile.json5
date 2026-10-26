@@ -3,7 +3,7 @@
     "products": [
       {
         "name": "default",
-        "signingConfig": "release",
+        "signingConfig": "default",
         "compileSdkVersion": "6.1.1(24)",
         "compatibleSdkVersion": "6.1.1(24)",
         "targetSdkVersion": "6.1.1(24)",
@@ -43,13 +43,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\24790\\.ohos\\config\\default_harmony_filament-cube_zrxsWxxVsRODLlW-QN7bJOSgVTdwybY5FHZ6ZL4dcQQ=.cer",
+          "certpath": "keystore/debug/debug.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B18CE125F5C0F482AE171A572C928590D67044673BE69046D793928FC8C4124DF5AE7393CE35256",
-          "profile": "C:\\Users\\24790\\.ohos\\config\\default_harmony_filament-cube_zrxsWxxVsRODLlW-QN7bJOSgVTdwybY5FHZ6ZL4dcQQ=.p7b",
+          "keyPassword": "0000001BBE3CE3E4FF06FABAB380EED95309BAF599A2D6287DC612C6B53A4F3879DB368285C953E20B6FB4",
+          "profile": "keystore/debug/debug.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\24790\\.ohos\\config\\default_harmony_filament-cube_zrxsWxxVsRODLlW-QN7bJOSgVTdwybY5FHZ6ZL4dcQQ=.p12",
-          "storePassword": "0000001BC27051828D0214EF909CA12037A2749AEE36FC9C81E58C2651010C204879E13401473DE8846AE0"
+          "storeFile": "keystore/debug/debug.p12",
+          "storePassword": "0000001B44E17BFA7DEF758B81F806E5D4269BB8AD3D3AB93B232C9C1E39236756FBCD1BF850836EFCE5B7"
         }
       },
       {

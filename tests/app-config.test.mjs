@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
@@ -46,13 +46,20 @@ test('uses the Chinese app name consistently while preserving the English brand'
   }
 });
 
-test('the default debug product reuses the release signing configuration', () => {
+test('debug signing is fixed in the repository for reuse across development machines', () => {
   const { app: build } = JSON.parse(read('build-profile.json5'));
-  const debugProduct = build.products.find(product => product.name === 'default');
-  const releaseProduct = build.products.find(product => product.name === 'release');
-  assert.equal(debugProduct?.signingConfig, 'release');
-  assert.equal(releaseProduct?.signingConfig, 'release');
-  assert.ok(build.signingConfigs.some(config => config.name === 'release'));
+  const product = name => build.products.find(entry => entry.name === name);
+  assert.equal(product('default')?.signingConfig, 'default');
+  assert.equal(product('release')?.signingConfig, 'release');
+  const debug = build.signingConfigs.find(config => config.name === 'default');
+  assert.equal(debug?.material.profile, 'keystore/debug/debug.p7b');
+  for (const config of build.signingConfigs) {
+    for (const key of ['certpath', 'profile', 'storeFile']) {
+      const value = config.material[key];
+      assert.match(value, /^keystore\//, `${config.name}: ${key} must be repository-relative`);
+      assert.ok(existsSync(new URL(value, root)), `${config.name}: ${key} is missing`);
+    }
+  }
 });
 
 test('phone conversion does not add permissions or capsule-only header spacing', () => {
