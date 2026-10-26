@@ -46,6 +46,15 @@ test('uses the Chinese app name consistently while preserving the English brand'
   }
 });
 
+test('the default debug product reuses the release signing configuration', () => {
+  const { app: build } = JSON.parse(read('build-profile.json5'));
+  const debugProduct = build.products.find(product => product.name === 'default');
+  const releaseProduct = build.products.find(product => product.name === 'release');
+  assert.equal(debugProduct?.signingConfig, 'release');
+  assert.equal(releaseProduct?.signingConfig, 'release');
+  assert.ok(build.signingConfigs.some(config => config.name === 'release'));
+});
+
 test('phone conversion does not add permissions or capsule-only header spacing', () => {
   assert.deepEqual(module.requestPermissions, [{ name: 'ohos.permission.VIBRATE' }]);
   assert.doesNotMatch(read('entry/src/main/ets/pages/Index.ets'), /Blank\(\)\.width\(88\)/);
