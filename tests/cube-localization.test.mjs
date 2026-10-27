@@ -186,7 +186,7 @@ test('tutorial and history inner-layer labels are regenerated rather than retain
   page.busy = true;
   page.language = 'en-GB';
   page.onLanguageChanged();
-  assert.match(page.hint, /^History hint: X layer 2 \+90°\./);
+  assert.match(page.hint, /^Solve suggestion: X layer 2 \+90°\./);
   assert.doesNotMatch(page.hint, /[\u3400-\u9fff]/);
   assert.equal(page.busy, true);
   assert.equal(page.phase, 'playing');

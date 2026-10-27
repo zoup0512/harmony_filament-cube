@@ -133,13 +133,13 @@ test('English observations preserve actual smoke home, game, metrics, order, dia
     element('', 'Column', {}, [element('Time'), element('00:12.34')]),
     element('', 'Column', {}, [element('Moves'), element('17')]),
     ...[2, 3, 4, 5].map(n => element(`${n}×${n}`, 'Button', { backgroundColor: n === 4 ? 'green' : 'white' })),
-    element('', 'Button', { description: 'History hint' }),
+    element('', 'Button', { description: 'Solve hint' }),
     element('', 'Button', { originalText: '↶ Undo' })]);
   assert.equal(api.isGame(state, 4), true);
   assert.equal(api.moves(state), 17);
   assert.equal(api.timer(state), '00:12.34');
   assert.equal(api.orderSelected(state, 4), true);
-  assert.equal(api.enabledButton(state, '历史提示'), true);
+  assert.equal(api.enabledButton(state, '还原提示'), true);
   assert.equal(api.enabledButton(state, api.regex('撤销')), true);
   assert.equal(state.nodes.find(n => n.rawText === '4 × 4 Cube').text, '4 × 4 魔方');
   assert.equal(state.tree.children[0].attributes.text, '4 × 4 Cube', 'raw artifact trees stay untouched');

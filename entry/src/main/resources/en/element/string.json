@@ -98,7 +98,7 @@
     },
     {
       "name": "history_hint",
-      "value": "History hint: %1$s. Swipe along the hand’s path, then release to turn the layer. Rotate the view if the hand is hidden. This retraces your moves, not an optimal solution. This session will not count toward your results."
+      "value": "Solve suggestion: %1$s. Swipe along the hand’s path, then release to turn the layer. Rotate the view if the hand is hidden. This follows this session’s move history, not necessarily the shortest solution. This session will not count toward your results."
     },
     {
       "name": "lesson_title",
@@ -318,7 +318,7 @@
     },
     {
       "name": "history_help",
-      "value": "History hint"
+      "value": "Solve hint"
     },
     {
       "name": "teaching",
@@ -450,7 +450,7 @@
     },
     {
       "name": "teaching_hint_note",
-      "value": "History hints retrace moves; they are not an optimal solution. Requesting a hint counts as assistance and marks this attempt as solved with hints when completed."
+      "value": "Solve hints retrace this attempt’s move history and may not be the shortest solution. Requesting a hint counts as assistance and marks this attempt as solved with hints when completed."
     },
     {
       "name": "teaching_completed_note",
@@ -602,7 +602,7 @@
     },
     {
       "name": "results_retention",
-      "value": "Only the latest 200 results are kept on this device.\nTutorials and sessions using history hints do not count."
+      "value": "Only the latest 200 results are kept on this device.\nTutorials and sessions using solve hints do not count."
     },
     {
       "name": "default_order",

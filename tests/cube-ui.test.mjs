@@ -73,7 +73,7 @@ test('canvas stays gesture-driven; beginner, tutorial and history help describe 
 
 for (const [key, label, handler] of [
   ['scramble', '打乱', 'scramble'], ['tutorial', '教程', 'startLesson'], ['reset', '复位', 'confirmReset'],
-  ['undo', '↶ 撤销', 'undo'], ['history_help', '历史提示', 'showHint']
+  ['undo', '↶ 撤销', 'undo'], ['history_help', '还原提示', 'showHint']
 ]) {
   test(`game retains the ${label} action and its handler`, () => {
     const block = buttonBlock(key);
@@ -242,8 +242,8 @@ test('teaching copy explains free routes, quarter-turn references, guidance and 
   assert.match(base.teaching_rules, /90°.*不代表最少步数/);
   assert.match(base.teaching_rules, /不计入普通计时成绩/);
   assert.match(english.teaching_rules, /any route.*90° quarter turns, not a minimum.*saved separately/);
-  assert.match(base.teaching_hint_note, /历史.*并非最优解.*请求提示.*提示通关/);
-  assert.match(english.teaching_hint_note, /not an optimal solution.*Requesting a hint counts as assistance/);
+  assert.match(base.teaching_hint_note, /还原提示.*操作历史.*不保证最短解.*请求提示.*提示通关/);
+  assert.match(english.teaching_hint_note, /Solve hints.*move history.*shortest solution.*Requesting a hint counts as assistance/);
   assert.match(base.teaching_history_hint, /小手.*滑动.*松手.*提示通关/);
   assert.match(english.teaching_history_hint, /hand.*swipe.*release.*solved with hints/);
   assert.match(base.teaching_save_failed, /本关已完成.*未能保存/);

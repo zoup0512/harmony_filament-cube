@@ -583,7 +583,7 @@ test('showHint marks the actual solve assisted and never writes a record', t => 
   const before = snapshot(s.model);
   s.showHint();
   assert.equal(s.assisted, true);
-  assert.match(s.hint, /历史回退参考：R'/);
+  assert.match(s.hint, /还原建议：R'/);
   assert.match(s.hint, /不计入成绩/);
   assert.equal(snapshot(s.model), before);
   s.requestMove(inverse);
