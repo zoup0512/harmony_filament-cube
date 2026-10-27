@@ -321,6 +321,242 @@
       "value": "History hint"
     },
     {
+      "name": "teaching",
+      "value": "Advanced lessons"
+    },
+    {
+      "name": "teaching_entry_title",
+      "value": "Advanced lessons"
+    },
+    {
+      "name": "teaching_kicker",
+      "value": "BUILD YOUR SKILLS"
+    },
+    {
+      "name": "teaching_title",
+      "value": "Master the solve, step by step"
+    },
+    {
+      "name": "teaching_description",
+      "value": "Start from a set position, choose your own route, and solve all six faces."
+    },
+    {
+      "name": "teaching_progress",
+      "value": "%1$d/%2$d completed"
+    },
+    {
+      "name": "teaching_rules",
+      "value": "Solve all six faces so each is one color, using any route. References count 90° quarter turns, not a minimum; there is no move or time limit. Progress is saved separately from regular timed results."
+    },
+    {
+      "name": "teaching_level",
+      "value": "Level %1$d"
+    },
+    {
+      "name": "teaching_level_details",
+      "value": "%1$d×%1$d · Reference quarter turns: %2$d"
+    },
+    {
+      "name": "teaching_difficulty_1",
+      "value": "Beginner"
+    },
+    {
+      "name": "teaching_difficulty_2",
+      "value": "Intermediate"
+    },
+    {
+      "name": "teaching_difficulty_3",
+      "value": "Advanced"
+    },
+    {
+      "name": "teaching_status_new",
+      "value": "Not yet solved"
+    },
+    {
+      "name": "teaching_status_guided",
+      "value": "Solved with hints"
+    },
+    {
+      "name": "teaching_status_solved",
+      "value": "Solved unaided"
+    },
+    {
+      "name": "teaching_best",
+      "value": "Best · Moves: %1$d · Time: %2$s"
+    },
+    {
+      "name": "teaching_goal",
+      "value": "Goal: make each of the six faces one solid color."
+    },
+    {
+      "name": "teaching_start_hint",
+      "value": "Your first swipe to turn a layer starts the timer. Solve any way you choose."
+    },
+    {
+      "name": "teaching_retry",
+      "value": "Retry"
+    },
+    {
+      "name": "teaching_retry_title",
+      "value": "Retry this level?"
+    },
+    {
+      "name": "teaching_retry_message",
+      "value": "Return to the same starting position and clear the timer and move count. This does not solve the cube. Saved learning progress is kept."
+    },
+    {
+      "name": "teaching_back",
+      "value": "Levels"
+    },
+    {
+      "name": "teaching_leave_title",
+      "value": "Return to levels?"
+    },
+    {
+      "name": "teaching_leave_message",
+      "value": "This unfinished position will not be saved. Saved learning progress is kept."
+    },
+    {
+      "name": "teaching_next",
+      "value": "Next"
+    },
+    {
+      "name": "teaching_all_complete",
+      "value": "This level is complete. Return to explore other positions."
+    },
+    {
+      "name": "teaching_passed",
+      "value": "Solved unaided!"
+    },
+    {
+      "name": "teaching_passed_guided",
+      "value": "Solved with hints!"
+    },
+    {
+      "name": "teaching_saving",
+      "value": "Saving learning progress…"
+    },
+    {
+      "name": "teaching_saved",
+      "value": "Learning progress saved."
+    },
+    {
+      "name": "teaching_save_failed",
+      "value": "Level complete, but learning progress could not be saved."
+    },
+    {
+      "name": "teaching_previous_save_failed",
+      "value": "The previous learning progress could not be saved."
+    },
+    {
+      "name": "teaching_hint_note",
+      "value": "History hints retrace moves; they are not an optimal solution. Requesting a hint counts as assistance and marks this attempt as solved with hints when completed."
+    },
+    {
+      "name": "teaching_completed_note",
+      "value": "Only learning progress is recorded, not regular timed results."
+    },
+    {
+      "name": "teaching_history_hint",
+      "value": "Solve reference: %1$s. Follow the hand with a swipe along its path, then release to turn the layer. Rotate the view if the hand is hidden. This attempt will be marked as solved with hints when completed."
+    },
+    {
+      "name": "teaching_first_turn_title",
+      "value": "One turn home"
+    },
+    {
+      "name": "teaching_first_turn_description",
+      "value": "See how a right-layer turn changes the 2×2 colors, and practice returning the corners to their places."
+    },
+    {
+      "name": "teaching_first_turn_tip",
+      "value": "Compare the color bands on neighboring faces to find the layer that needs turning back. Check more than the face in front."
+    },
+    {
+      "name": "teaching_corner_pair_title",
+      "value": "Two-face relay"
+    },
+    {
+      "name": "teaching_corner_pair_description",
+      "value": "The 2×2 right and top layers have turned in succession. Practice tracking how one turn affects the next."
+    },
+    {
+      "name": "teaching_corner_pair_tip",
+      "value": "Keep one corner's three colors in mind. Watch how it moves between neighboring layers before choosing your next turn."
+    },
+    {
+      "name": "teaching_corner_loop_title",
+      "value": "Corner loop"
+    },
+    {
+      "name": "teaching_corner_loop_description",
+      "value": "Back-and-forth right and top turns have displaced the 2×2 corners. Practice checking both position and orientation."
+    },
+    {
+      "name": "teaching_corner_loop_tip",
+      "value": "Identify each corner by its color combination, then check its orientation. Colors separated for a moment can meet again in later turns."
+    },
+    {
+      "name": "teaching_last_layer_title",
+      "value": "Top layer home"
+    },
+    {
+      "name": "teaching_last_layer_description",
+      "value": "The 3×3 bottom two layers are solved, but the top layer is offset. Practice aligning the top rows of the side faces."
+    },
+    {
+      "name": "teaching_last_layer_tip",
+      "value": "A solid-color top is not enough. Look around all four sides and check that each top row matches the colors below."
+    },
+    {
+      "name": "teaching_right_slot_title",
+      "value": "Restore the right slot"
+    },
+    {
+      "name": "teaching_right_slot_description",
+      "value": "The 3×3 right slot and top layer need restoring. Practice tracking a corner together with its neighboring edge."
+    },
+    {
+      "name": "teaching_right_slot_tip",
+      "value": "Find the target corner's three colors and locate its place, then check the neighboring edge. Look again after each turn."
+    },
+    {
+      "name": "teaching_cross_return_title",
+      "value": "Restore the cross"
+    },
+    {
+      "name": "teaching_cross_return_description",
+      "value": "The 3×3 bottom two layers are solved. Two neighboring top edges face upward in an L shape. Practice recognizing edge orientation."
+    },
+    {
+      "name": "teaching_cross_return_tip",
+      "value": "First check which top edges face upward, then check their side colors. A cross is only part of the goal: all six faces must be solved."
+    },
+    {
+      "name": "teaching_corner_orient_title",
+      "value": "Orient the top corners"
+    },
+    {
+      "name": "teaching_corner_orient_description",
+      "value": "The 3×3 bottom two layers are solved and the top edges are oriented, but only one top corner faces upward. Check top-layer positions as well as orientation."
+    },
+    {
+      "name": "teaching_corner_orient_tip",
+      "value": "A corner facing the right way may still be in the wrong place. Top edges may also be misplaced, so rotate the view to check side colors."
+    },
+    {
+      "name": "teaching_edge_cycle_title",
+      "value": "Cycle the top edges"
+    },
+    {
+      "name": "teaching_edge_cycle_description",
+      "value": "The 3×3 top corners are solved, while three top edges are cycled out of place. Practice identifying each edge's destination."
+    },
+    {
+      "name": "teaching_edge_cycle_tip",
+      "value": "Use the side colors to trace the three edges' destinations and their cycle. Make sure the solved top corners are still correct at the end."
+    },
+    {
       "name": "personal_best",
       "value": "PERSONAL BEST"
     },

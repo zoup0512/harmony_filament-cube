@@ -158,3 +158,102 @@ test('game retains view reset, canvas, time and move count', () => {
   wired(game, 'move_count');
   wired(game, 'cube_title');
 });
+
+test('advanced teaching naming is consistent across entry, header, descriptions and level titles', () => {
+  assert.equal(base.teaching, '进阶教学');
+  assert.equal(base.teaching_entry_title, base.teaching);
+  assert.equal(base.teaching_title, '循序练习，掌握还原');
+  assert.equal(base.teaching_description, '从指定局面出发，自由选择路线，完成六面复原。');
+  assert.equal(base.teaching_cross_return_title, '十字还原');
+  assert.equal(english.teaching, 'Advanced lessons');
+  assert.equal(english.teaching_entry_title, english.teaching);
+  assert.equal(english.teaching_title, 'Master the solve, step by step');
+  assert.equal(english.teaching_description,
+    'Start from a set position, choose your own route, and solve all six faces.');
+  for (const copy of [...Object.values(base), ...Object.values(english)]) {
+    assert.doesNotMatch(copy, /残局|endgame/i);
+  }
+});
+
+test('teaching home entry is a single-line button matching the start action geometry', () => {
+  const home = member('homePage');
+  wired(home, 'teaching_entry_title');
+  const entryEnd = home.indexOf('\n', home.indexOf('this.openTeaching()'));
+  const entry = home.slice(home.lastIndexOf('Button({', home.indexOf("Text('→')")), entryEnd);
+  assert.match(entry, /Text\(this\.tr\('teaching_entry_title'\)\)\.fontSize\(17\)\.fontWeight\(FontWeight\.Bold\)\.fontColor\(CubeTheme\.ink\)/);
+  assert.match(entry, /Text\('→'\)/);
+  assert.doesNotMatch(entry, /▦|↗|teaching_entry_description|Column\(/);
+  assert.match(entry, /\.height\(56\)\.padding\(0\)\.borderRadius\(18\)\s*\.backgroundColor\(CubeTheme\.mint\)/);
+  assert.match(entry, /\.enabled\(this\.loaded\)\s*\.accessibilityText\(this\.tr\('teaching_entry_title'\)\)\.onClick\(\(\) => this\.openTeaching\(\)\)/);
+});
+
+test('teaching home entry opens a resource-backed catalogue with stable IDs and persisted progress', () => {
+  const home = member('homePage');
+  assert.match(home, /\.enabled\(this\.loaded\)\s*\.accessibilityText\(this\.tr\('teaching_entry_title'\)\)\.onClick\(\(\) => this\.openTeaching\(\)\)/);
+  assert.match(member('build'), /this\.page === 'teaching'\) \{\s*this\.teachingPage\(\)/);
+  const catalogue = member('teachingPage');
+  assert.match(catalogue, /this\.header\('teaching'\)/);
+  assert.match(catalogue, /this\.sectionTitle\('teaching_kicker', 'teaching_title'\)/);
+  for (const key of ['teaching_description', 'teaching_progress', 'teaching_rules', 'teaching_level_details']) wired(catalogue, key);
+  assert.match(catalogue, /this\.tr\('teaching_progress', this\.teachingRecords\.length, this\.challenges\.length\)/);
+  assert.match(catalogue, /ForEach\(this\.challenges, \(challenge: TeachingChallenge, index: number\) =>/);
+  assert.match(catalogue, /this\.tr\(challenge\.titleKey\)/);
+  assert.match(catalogue, /this\.tr\(challenge\.descriptionKey\)/);
+  assert.match(catalogue, /this\.tr\('teaching_level_details', challenge\.order, challenge\.referenceMoves\)/);
+  for (const level of [1, 2, 3]) {
+    const key = `teaching_difficulty_${level}`;
+    assert.ok(catalogue.includes(`'${key}'`));
+    assert.ok(base[key]);
+    assert.ok(english[key]);
+  }
+  assert.match(catalogue, /Text\(this\.teachingStatus\(challenge\)\)/);
+  assert.match(catalogue, /Text\(this\.teachingBest\(challenge\)\)/);
+  assert.match(catalogue, /\.enabled\(this\.loaded\)\.onClick\(\(\) => this\.startChallenge\(index\)\)/);
+  assert.match(catalogue, /\(challenge: TeachingChallenge\) => challenge\.id/);
+  assert.match(catalogue, /Text\(this\.storageWarning\)/);
+});
+
+test('teaching game shows the real goal and substitutes retry/back controls for legacy automation', () => {
+  const game = member('gamePage');
+  const goal = member('teachingGoal');
+  wired(game, 'teaching_level');
+  wired(goal, 'teaching_goal');
+  assert.match(goal, /this\.tr\(this\.challenges\[this\.challengeIndex\]\.tipKey\)/);
+  assert.match(goal, /this\.tr\('teaching_level_details', this\.order, this\.challenges\[this\.challengeIndex\]\.referenceMoves\)/);
+  assert.match(game, /if \(this\.challengeIndex >= 0\) \{\s*this\.teachingGoal\(\)/);
+  assert.match(game, /if \(this\.challengeIndex >= 0\) \{\s*this\.teachingControls\(\)\s*\} else \{/);
+  const legacy = game.slice(game.indexOf('this.teachingControls()'), game.indexOf("Button(this.tr('undo')"));
+  for (const key of ['scramble', 'tutorial', 'reset']) wired(legacy, key);
+  const controls = member('teachingControls');
+  assert.doesNotMatch(controls, /doScramble|scramble\(\)|startLesson|doLesson|confirmReset|resetStepByStep/);
+  for (const key of ['teaching_retry', 'teaching_back', 'teaching_hint_note']) wired(controls, key);
+  assert.match(controls, /if \(this\.phase === 'solved'\) \{[\s\S]*?this\.assisted \? 'teaching_passed_guided' : 'teaching_passed'/);
+  assert.match(controls, /this\.challengeIndex === this\.challenges\.length - 1 \? 'teaching_back' : 'teaching_next'/);
+  assert.match(controls, /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.nextChallenge\(\)\)/);
+  assert.match(controls, /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.retryChallenge\(\)\)/);
+  assert.match(controls, /\.onClick\(\(\) => this\.goHome\(\)\)/);
+  assert.match(member('backButton'), /this\.challengeIndex >= 0 \? 'teaching_back' : 'return_home'/);
+  assert.match(member('showHint'), /this\.setHint\('teaching_history_hint', this\.moveLabel\(solution\[0\]\)\)/);
+  assert.doesNotMatch(member('statsPage'), /teachingRecords/);
+});
+
+test('teaching copy explains free routes, quarter-turn references, guidance and independent saves accurately', () => {
+  assert.match(base.teaching_rules, /任何还原路线均可/);
+  assert.match(base.teaching_rules, /90°.*不代表最少步数/);
+  assert.match(base.teaching_rules, /不计入普通计时成绩/);
+  assert.match(english.teaching_rules, /any route.*90° quarter turns, not a minimum.*saved separately/);
+  assert.match(base.teaching_hint_note, /历史.*并非最优解.*请求提示.*提示通关/);
+  assert.match(english.teaching_hint_note, /not an optimal solution.*Requesting a hint counts as assistance/);
+  assert.match(base.teaching_history_hint, /小手.*滑动.*松手.*提示通关/);
+  assert.match(english.teaching_history_hint, /hand.*swipe.*release.*solved with hints/);
+  assert.match(base.teaching_save_failed, /本关已完成.*未能保存/);
+  assert.match(english.teaching_save_failed, /Level complete, but.*could not be saved/);
+});
+
+test('game Scroll resets its position on mount and on same-page challenge changes', () => {
+  const game = member('gamePage');
+  assert.match(source, /private gameScroller: Scroller = new Scroller\(\)/);
+  assert.match(game, /Scroll\(this\.gameScroller\)/);
+  assert.match(game, /\.onAppear\(\(\) => this\.gameScroller\.scrollTo\(\{ xOffset: 0, yOffset: 0 \}\)\)/);
+  assert.match(member('startChallenge'), /if \(mounted\) \{ this\.gameScroller\.scrollTo\(\{ xOffset: 0, yOffset: 0 \}\); \}/);
+});

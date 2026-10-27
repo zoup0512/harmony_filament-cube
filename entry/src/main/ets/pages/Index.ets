@@ -1,8 +1,9 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CubeModel, CubeMove } from '../model/CubeModel';
+import { TeachingChallenge, createTeachingChallenges } from '../model/CubeTeaching';
 import { CubeRenderer } from '../render/CubeRenderer';
-import { CubeStore, CubeSettings, SolveRecord } from '../storage/CubeStore';
+import { CubeStore, CubeSettings, SolveRecord, TeachingRecord } from '../storage/CubeStore';
 import { CubeFeedback } from '../platform/CubeFeedback';
 import { CubeTheme } from './CubeTheme';
 
@@ -24,6 +25,8 @@ struct Index {
   @State private beginnerGuides: boolean = true;
   @State private defaultOrder: number = 3;
   @State private records: SolveRecord[] = [];
+  @State private teachingRecords: TeachingRecord[] = [];
+  @State private challengeIndex: number = -1;
   @State private loaded: boolean = false;
   @State private storageWarning: string = '';
   @State private assisted: boolean = false;
@@ -41,6 +44,7 @@ struct Index {
   private store: CubeStore = new CubeStore();
   private feedback: CubeFeedback = new CubeFeedback();
   private context2d: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private gameScroller: Scroller = new Scroller();
   private canvasWidth: number = 320;
   private canvasHeight: number = 320;
   private canvasReady: boolean = false;
@@ -78,6 +82,8 @@ struct Index {
   private downYaw: number = 0;
   private downPitch: number = 0;
   private downPage: string = '';
+  private practiceOrder: number = 3;
+  private readonly challenges: TeachingChallenge[] = createTeachingChallenges();
   private readonly orders: number[] = [2, 3, 4, 5];
   private readonly firstFaces: string[] = ['U', "U'", 'D', "D'", 'L', "L'"];
   private readonly secondFaces: string[] = ['R', "R'", 'F', "F'", 'B', "B'"];
@@ -128,8 +134,8 @@ struct Index {
     this.textCache.clear();
     if (this.hintKey.length > 0) {
       if (this.hintKey === 'lesson_step' && this.lessonIndex < this.lesson.length) { this.updateLessonHint(); }
-      else if (this.hintKey === 'history_hint' && this.hintMove !== null) {
-        this.setHint('history_hint', this.moveLabel(this.hintMove));
+      else if ((this.hintKey === 'history_hint' || this.hintKey === 'teaching_history_hint') && this.hintMove !== null) {
+        this.setHint(this.hintKey, this.moveLabel(this.hintMove));
       }
       else { this.setHint(this.hintKey, ...this.hintArgs); }
     }
@@ -147,6 +153,7 @@ struct Index {
       this.haptics = this.store.settings.haptics;
       this.beginnerGuides = this.store.settings.beginnerGuides;
       this.records = this.store.records.slice();
+      this.teachingRecords = this.store.teachingRecords.slice();
       this.invalidateGesture(true);
       this.model.reset(this.order);
       this.draw();
@@ -207,7 +214,10 @@ struct Index {
     if (!this.canvasReady) { this.resetGuide(); return; }
     this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
       this.model, this.yaw, this.pitch, this.activeMove, progress, this.cubeZoom);
-    if (this.busy || this.page !== 'game') { this.resetGuide(); return; }
+    if (this.busy || this.page !== 'game' || (this.challengeIndex >= 0 && this.phase === 'solved')) {
+      this.resetGuide();
+      return;
+    }
     const target = this.guideTarget();
     if (target === null) {
       this.resetGuide();
@@ -305,7 +315,82 @@ struct Index {
     this.lesson = [];
     this.lessonIndex = 0;
     this.lessonTotal = 0;
+    this.challengeIndex = -1;
     this.draw();
+  }
+
+  private openTeaching(): void {
+    if (!this.loaded || !this.foreground || this.page !== 'home') { return; }
+    this.practiceOrder = this.order;
+    this.canvasReady = false;
+    this.resetSession();
+    this.page = 'teaching';
+  }
+
+  private startChallenge(index: number): void {
+    if (!this.loaded || !this.foreground || this.busy || !Number.isInteger(index) ||
+      index < 0 || index >= this.challenges.length ||
+      (this.page !== 'teaching' && (this.page !== 'game' || this.challengeIndex < 0))) { return; }
+    const challenge = this.challenges[index];
+    const mounted = this.page === 'game';
+    const ready = mounted && this.canvasReady;
+    this.canvasReady = false;
+    this.order = challenge.order;
+    this.resetSession();
+    this.challengeIndex = index;
+    challenge.load(this.model);
+    this.yaw = 0.62;
+    this.pitch = -0.42;
+    this.cubeZoom = 1.12;
+    this.phase = 'ready';
+    this.setHint('teaching_start_hint');
+    this.page = 'game';
+    this.canvasReady = ready;
+    if (mounted) { this.gameScroller.scrollTo({ xOffset: 0, yOffset: 0 }); }
+    this.draw();
+  }
+
+  private retryChallenge(): void {
+    if (this.busy || !this.foreground || this.page !== 'game' || this.challengeIndex < 0) { return; }
+    if (this.phase !== 'playing') {
+      this.startChallenge(this.challengeIndex);
+      return;
+    }
+    const savedSession = this.sessionId;
+    const index = this.challengeIndex;
+    this.getUIContext().showAlertDialog({
+      title: this.tr('teaching_retry_title'), message: this.tr('teaching_retry_message'),
+      primaryButton: { value: this.tr('cancel'), action: () => {} },
+      secondaryButton: { value: this.tr('teaching_retry'), action: () => {
+        if (savedSession === this.sessionId && this.page === 'game') { this.startChallenge(index); }
+      } }
+    });
+  }
+
+  private leaveChallenge(): void {
+    this.canvasReady = false;
+    this.order = this.practiceOrder;
+    this.resetSession();
+    this.cubeZoom = 1;
+    this.page = 'teaching';
+  }
+
+  private nextChallenge(): void {
+    if (this.page !== 'game' || this.phase !== 'solved' || this.challengeIndex < 0 ||
+      this.busy || !this.foreground) { return; }
+    if (this.challengeIndex + 1 < this.challenges.length) { this.startChallenge(this.challengeIndex + 1); }
+    else { this.leaveChallenge(); }
+  }
+
+  private teachingStatus(challenge: TeachingChallenge): string {
+    const record = this.teachingRecords.find((item: TeachingRecord) => item.challengeId === challenge.id);
+    if (record === undefined) { return this.tr('teaching_status_new'); }
+    return this.tr(record.assisted ? 'teaching_status_guided' : 'teaching_status_solved');
+  }
+
+  private teachingBest(challenge: TeachingChallenge): string {
+    const record = this.teachingRecords.find((item: TeachingRecord) => item.challengeId === challenge.id);
+    return record === undefined ? '' : this.tr('teaching_best', record.moves, this.formatTime(record.durationMs));
   }
 
   private chooseOrder(value: number): void {
@@ -324,13 +409,27 @@ struct Index {
   }
 
   private leavePage(): void {
+    if (this.challengeIndex >= 0) { this.order = this.practiceOrder; }
+    this.canvasReady = false;
     this.resetSession();
     this.cubeZoom = 1;
-    this.canvasReady = false;
     this.page = 'home';
   }
 
   private goHome(): void {
+    if (this.page === 'game' && this.challengeIndex >= 0) {
+      if (this.busy || this.phase === 'playing') {
+        const savedSession = this.sessionId;
+        this.getUIContext().showAlertDialog({
+          title: this.tr('teaching_leave_title'), message: this.tr('teaching_leave_message'),
+          primaryButton: { value: this.tr('keep_playing'), action: () => {} },
+          secondaryButton: { value: this.tr('teaching_back'), action: () => {
+            if (savedSession === this.sessionId && this.foreground) { this.leaveChallenge(); }
+          } }
+        });
+      } else { this.leaveChallenge(); }
+      return;
+    }
     if (this.page === 'game' && (this.busy || this.phase === 'playing' || this.phase === 'ready' || this.phase === 'tutorial')) {
       this.getUIContext().showAlertDialog({
         title: this.tr('leave_title'),
@@ -342,7 +441,7 @@ struct Index {
   }
 
   private confirmReset(): void {
-    if (this.busy || !this.foreground || this.page !== 'game') { return; }
+    if (this.busy || !this.foreground || this.page !== 'game' || this.challengeIndex >= 0) { return; }
     const savedSession = this.sessionId;
     this.getUIContext().showAlertDialog({
       title: this.tr('reset_title'),
@@ -355,7 +454,7 @@ struct Index {
   }
 
   private resetStepByStep(): void {
-    if (this.busy || !this.foreground || this.page !== 'game') { return; }
+    if (this.busy || !this.foreground || this.page !== 'game' || this.challengeIndex >= 0) { return; }
     const solution = this.model.getSolution();
     if (this.model.isSolved() || solution.length === 0) {
       this.resetSession();
@@ -379,7 +478,7 @@ struct Index {
   }
 
   private scramble(): void {
-    if (this.busy) { return; }
+    if (this.busy || this.challengeIndex >= 0) { return; }
     if (this.phase === 'playing' || this.phase === 'tutorial') {
       this.getUIContext().showAlertDialog({
         title: this.tr('rescramble_title'), message: this.tr('rescramble_message'),
@@ -390,6 +489,7 @@ struct Index {
   }
 
   private doScramble(): void {
+    if (this.challengeIndex >= 0) { return; }
     this.resetSession();
     const counts: number[] = [11, 25, 45, 65];
     this.setHint('scrambling_hint');
@@ -422,7 +522,8 @@ struct Index {
   }
 
   private requestMove(move: CubeMove): void {
-    if (this.busy || !this.foreground) { return; }
+    if (this.busy || !this.foreground || this.page !== 'game' ||
+      (this.challengeIndex >= 0 && this.phase === 'solved')) { return; }
     if (this.phase === 'tutorial') {
       if (this.lessonIndex < this.lesson.length && this.sameMove(move, this.lesson[this.lessonIndex])) {
         this.animate([move], 'lessonStep');
@@ -459,19 +560,20 @@ struct Index {
   }
 
   private showHint(): void {
-    if (this.busy || this.phase === 'tutorial' || this.model.isSolved()) { return; }
+    if (this.busy || !this.foreground || this.page !== 'game' || this.phase === 'tutorial' || this.model.isSolved()) { return; }
     const solution = this.model.getSolution();
     if (solution.length > 0) {
       this.assisted = true;
       this.hintMove = solution[0];
       this.resetGuide();
-      this.setHint('history_hint', this.moveLabel(solution[0]));
+      if (this.challengeIndex >= 0) { this.setHint('teaching_history_hint', this.moveLabel(solution[0])); }
+      else { this.setHint('history_hint', this.moveLabel(solution[0])); }
       this.draw();
     }
   }
 
   private startLesson(): void {
-    if (this.busy) { return; }
+    if (this.busy || this.challengeIndex >= 0) { return; }
     if (this.phase === 'playing' || this.phase === 'ready') {
       this.getUIContext().showAlertDialog({
         title: this.tr('lesson_title'), message: this.tr('lesson_message'),
@@ -482,6 +584,7 @@ struct Index {
   }
 
   private doLesson(): void {
+    if (this.challengeIndex >= 0) { return; }
     this.resetSession();
     const faces: string[] = ['R', 'U', "F'", 'L', "D'"];
     const setup: CubeMove[] = [];
@@ -498,9 +601,28 @@ struct Index {
     this.setHint('lesson_step', this.lessonIndex + 1, this.lessonTotal, this.moveLabel(this.lesson[this.lessonIndex]));
   }
 
+  private finishTeaching(): void {
+    const challenge = this.challenges[this.challengeIndex];
+    const record = new TeachingRecord(challenge.id, this.elapsed, this.moves, this.assisted);
+    const savedSession = this.sessionId;
+    this.setHint('teaching_saving');
+    this.store.addTeachingRecord(record).then(() => {
+      this.teachingRecords = this.store.teachingRecords.slice();
+      if (savedSession === this.sessionId && this.phase === 'solved') { this.setHint('teaching_saved'); }
+    }).catch(() => {
+      if (savedSession === this.sessionId && this.phase === 'solved') { this.setHint('teaching_save_failed'); }
+      else { this.toast(this.tr('teaching_previous_save_failed')); }
+    });
+  }
+
   private finishSolve(): void {
+    if (this.phase !== 'playing' || this.busy || !this.model.isSolved()) { return; }
     this.elapsed = this.timeBase + Date.now() - this.startedAt;
     this.phase = 'solved';
+    if (this.challengeIndex >= 0) {
+      this.finishTeaching();
+      return;
+    }
     if (this.assisted) {
       this.setHint('solved_assisted');
       return;
@@ -626,7 +748,7 @@ struct Index {
       if (!this.touching) {
         this.setTouchOrigin(event.touches);
         this.orbiting = event.touches.length > 1 || this.page === 'home' ||
-          !this.renderer.hitTest(this.startX, this.startY);
+          (this.challengeIndex >= 0 && this.phase === 'solved') || !this.renderer.hitTest(this.startX, this.startY);
         this.blockedTouch = !this.orbiting && this.busy;
         this.downVersion = this.gestureVersion;
         this.downSession = this.sessionId;
@@ -863,6 +985,16 @@ struct Index {
         Button(this.tr('start_game'), { type: ButtonType.Normal }).width('100%').height(56)
           .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Bold)
           .borderRadius(18).enabled(this.loaded).onClick(() => this.startGame())
+        Button({ type: ButtonType.Normal }) {
+          Stack({ alignContent: Alignment.Center }) {
+            Text(this.tr('teaching_entry_title')).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            Row() {
+              Text('→').fontSize(20).fontColor(CubeTheme.ink).accessibilityLevel('no')
+            }.width('100%').justifyContent(FlexAlign.End).padding({ right: 18 })
+          }.width('100%').height(56)
+        }.width('100%').height(56).padding(0).borderRadius(18)
+          .backgroundColor(CubeTheme.mint).enabled(this.loaded)
+          .accessibilityText(this.tr('teaching_entry_title')).onClick(() => this.openTeaching())
         Row({ space: 10 }) {
           Button({ type: ButtonType.Normal }) {
             Row({ space: 10 }) {
@@ -902,7 +1034,7 @@ struct Index {
     }.width(44).height(44).padding(0)
       .backgroundColor(Color.Transparent)
       .id('back-button')
-      .accessibilityText(this.tr('return_home')).onClick(() => this.goHome())
+      .accessibilityText(this.tr(this.challengeIndex >= 0 ? 'teaching_back' : 'return_home')).onClick(() => this.goHome())
   }
 
   @Builder
@@ -914,19 +1046,118 @@ struct Index {
   }
 
   @Builder
+  private teachingPage() {
+    Column({ space: 18 }) {
+      this.header('teaching')
+      Scroll() {
+        Column({ space: 16 }) {
+          this.sectionTitle('teaching_kicker', 'teaching_title')
+          Text(this.tr('teaching_description')).fontSize(13).lineHeight(21).fontColor(CubeTheme.secondary).width('100%')
+          Column({ space: 10 }) {
+            Text(this.tr('teaching_progress', this.teachingRecords.length, this.challenges.length))
+              .fontSize(20).fontWeight(FontWeight.Bold).fontColor(CubeTheme.accent)
+            Text(this.tr('teaching_rules')).fontSize(11).lineHeight(19).fontColor('#DCE6DF')
+          }.width('100%').alignItems(HorizontalAlign.Start).padding(20).backgroundColor(CubeTheme.ink).borderRadius(24)
+          ForEach(this.challenges, (challenge: TeachingChallenge, index: number) => {
+            Button({ type: ButtonType.Normal }) {
+              Column({ space: 11 }) {
+                Row({ space: 10 }) {
+                  Text((index + 1).toString().padStart(2, '0')).fontSize(19).fontWeight(FontWeight.Bold)
+                    .fontColor(CubeTheme.green).width(46).height(46).textAlign(TextAlign.Center)
+                    .backgroundColor(CubeTheme.mint).borderRadius(14)
+                  Column({ space: 5 }) {
+                    Text(this.tr(challenge.titleKey)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+                    Text(this.tr('teaching_level_details', challenge.order, challenge.referenceMoves))
+                      .fontSize(11).lineHeight(17).fontColor(CubeTheme.secondary)
+                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Text('›').fontSize(25).fontColor(CubeTheme.green).accessibilityLevel('no')
+                }.width('100%')
+                Text(this.tr(challenge.descriptionKey)).fontSize(12).lineHeight(20).fontColor(CubeTheme.secondary).width('100%')
+                Row({ space: 8 }) {
+                  Text(this.tr(challenge.difficulty === 1 ? 'teaching_difficulty_1' :
+                    (challenge.difficulty === 2 ? 'teaching_difficulty_2' : 'teaching_difficulty_3')))
+                    .fontSize(10).fontColor(CubeTheme.green)
+                    .padding({ left: 9, right: 9, top: 5, bottom: 5 }).backgroundColor(CubeTheme.mint).borderRadius(8)
+                  Text(this.teachingStatus(challenge)).fontSize(11).fontColor(CubeTheme.green).layoutWeight(1)
+                    .textAlign(TextAlign.End)
+                }.width('100%')
+                if (this.teachingBest(challenge).length > 0) {
+                  Text(this.teachingBest(challenge)).fontSize(11).fontColor(CubeTheme.secondary).width('100%')
+                }
+              }.width('100%').padding(18).alignItems(HorizontalAlign.Start)
+            }.width('100%').padding(0).borderRadius(22).backgroundColor(CubeTheme.surface)
+              .enabled(this.loaded).onClick(() => this.startChallenge(index))
+          }, (challenge: TeachingChallenge) => challenge.id)
+          if (this.storageWarning.length > 0) {
+            Text(this.storageWarning).fontSize(11).lineHeight(18).fontColor(CubeTheme.danger).width('100%')
+          }
+        }.width('100%').padding({ bottom: 24 })
+      }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
+    }.width('100%').height('100%').constraintSize({ maxWidth: 600 }).padding({ left: 22, right: 22, top: 10 })
+  }
+
+  @Builder
+  private teachingGoal() {
+    if (this.challengeIndex >= 0) {
+      Column({ space: 6 }) {
+        Text(this.tr('teaching_goal')).fontSize(13).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+        Text(this.tr(this.challenges[this.challengeIndex].tipKey)).fontSize(11).lineHeight(18).fontColor(CubeTheme.secondary)
+        Text(this.tr('teaching_level_details', this.order, this.challenges[this.challengeIndex].referenceMoves))
+          .fontSize(10).fontColor(CubeTheme.green)
+      }.width('100%').alignItems(HorizontalAlign.Start).padding(14).backgroundColor(CubeTheme.surface).borderRadius(18)
+    }
+  }
+
+  @Builder
+  private teachingControls() {
+    Column({ space: 10 }) {
+      if (this.phase === 'solved') {
+        Text(this.tr(this.assisted ? 'teaching_passed_guided' : 'teaching_passed'))
+          .fontSize(19).fontWeight(FontWeight.Bold).fontColor(CubeTheme.green).width('100%')
+        Text(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'teaching_all_complete' : 'teaching_completed_note'))
+          .fontSize(11).lineHeight(18).fontColor(CubeTheme.secondary).width('100%')
+        Button(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'teaching_back' : 'teaching_next'),
+          { type: ButtonType.Normal }).width('100%').height(48).borderRadius(14).fontSize(15)
+          .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontWeight(FontWeight.Bold)
+          .enabled(!this.busy).onClick(() => this.nextChallenge())
+      }
+      Row({ space: 10 }) {
+        Button(this.tr('teaching_retry'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+          .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14)
+          .enabled(!this.busy).onClick(() => this.retryChallenge())
+        Button(this.tr('teaching_back'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+          .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14)
+          .onClick(() => this.goHome())
+      }.width('100%')
+      if (this.phase !== 'solved') {
+        Text(this.tr('teaching_hint_note')).fontSize(10).lineHeight(17).fontColor(CubeTheme.secondary).width('100%')
+      }
+    }.width('100%')
+  }
+
+  @Builder
   private gamePage() {
-    Scroll() {
+    Scroll(this.gameScroller) {
       Column({ space: 12 }) {
         Row({ space: 12 }) {
           this.backButton()
           Column({ space: 3 }) {
-            Text(this.tr('cube_title', this.order)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            if (this.challengeIndex >= 0) {
+              Text(this.tr('teaching_level', this.challengeIndex + 1) + ' · ' +
+                this.tr(this.challenges[this.challengeIndex].titleKey))
+                .fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).maxLines(2)
+            } else {
+              Text(this.tr('cube_title', this.order)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            }
             Row({ space: 5 }) {
               Circle().width(5).height(5).fill(CubeTheme.green)
               Text(this.phaseLabel()).fontSize(11).fontColor(CubeTheme.green)
             }
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        }.width('100%').height(48)
+        }.width('100%').constraintSize({ minHeight: 48 })
+        if (this.challengeIndex >= 0) {
+          this.teachingGoal()
+        }
         Row() {
           Column({ space: 5 }) {
             Text(this.tr('elapsed_time')).fontSize(11).fontColor('#C3D2CA')
@@ -941,7 +1172,8 @@ struct Index {
           .backgroundColor(CubeTheme.ink).borderRadius(24)
         Stack() {
           this.cubeStage()
-        }.width('100%').height(Math.max(240, Math.min(480, this.viewportHeight - (this.hint.length > 0 ? 450 : 370))))
+        }.width('100%').height(Math.max(240, Math.min(480, this.viewportHeight -
+          (this.hint.length > 0 ? 450 : 370) - (this.challengeIndex >= 0 ? 120 : 0))))
         Row({ space: 6 }) {
           Text(this.guideTarget() !== null ? this.tr('guided_help') :
             this.tr('gesture_help'))
@@ -961,17 +1193,21 @@ struct Index {
             .width('100%').padding(12).backgroundColor(CubeTheme.mint).borderRadius(14)
         }
         Column({ space: 10 }) {
-          Row({ space: 8 }) {
-            Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-              .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
-              .enabled(!this.busy).onClick(() => this.scramble())
-            Button(this.tr('tutorial'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-              .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).enabled(!this.busy)
-              .onClick(() => this.startLesson())
-            Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14)
-              .enabled(!this.busy).onClick(() => this.confirmReset())
-          }.width('100%').margin({ top: 4 })
+          if (this.challengeIndex >= 0) {
+            this.teachingControls()
+          } else {
+            Row({ space: 8 }) {
+              Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+                .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
+                .enabled(!this.busy).onClick(() => this.scramble())
+              Button(this.tr('tutorial'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+                .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).enabled(!this.busy)
+                .onClick(() => this.startLesson())
+              Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
+                .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14)
+                .enabled(!this.busy).onClick(() => this.confirmReset())
+            }.width('100%').margin({ top: 4 })
+          }
           Row({ space: 12 }) {
             Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
               .backgroundColor(Color.Transparent).fontColor(CubeTheme.secondary)
@@ -991,6 +1227,7 @@ struct Index {
         // Keep a cube gesture from also scrolling its surrounding page.
         return { offsetRemain: this.touching ? 0 : offset };
       })
+      .onAppear(() => this.gameScroller.scrollTo({ xOffset: 0, yOffset: 0 }))
   }
 
   @Builder
@@ -1167,6 +1404,8 @@ struct Index {
         this.homePage()
       } else if (this.page === 'game') {
         this.gamePage()
+      } else if (this.page === 'teaching') {
+        this.teachingPage()
       } else if (this.page === 'stats') {
         this.statsPage()
       } else {

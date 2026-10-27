@@ -23,7 +23,10 @@ function check(condition, message) {
   checks++;
 }
 function renamed(file, original) {
-  const name = names[`entry/src/main/ets/${file}`]?.IdentifierCache?.[`#${original}`];
+  const identifiers = names[`entry/src/main/ets/${file}`]?.IdentifierCache ?? {};
+  const matches = Object.entries(identifiers).filter(([key]) => key === `#${original}` || key.startsWith(`#${original}:`));
+  check(matches.length === 1, `${original} must have one top-level mapping in the actual Release cache`);
+  const name = matches[0][1];
   check(typeof name === 'string' && name !== original, `${original} must be renamed in the actual Release cache`);
   return name;
 }
@@ -52,8 +55,9 @@ try {
   const symbols = {};
   for (const [file, originals] of [
     ['model/CubeModel.ts', ['CubeModel', 'CubeMove']],
+    ['model/CubeTeaching.ts', ['TeachingChallenge', 'createTeachingChallenges']],
     ['render/CubeRenderer.ets', ['CubeRenderer']],
-    ['storage/CubeStore.ets', ['CubeStore', 'CubeSettings', 'SolveRecord']],
+    ['storage/CubeStore.ets', ['CubeStore', 'CubeSettings', 'SolveRecord', 'TeachingRecord']],
     ['platform/CubeFeedback.ets', ['CubeFeedback']]
   ]) {
     for (const original of originals) {
@@ -64,7 +68,8 @@ try {
     }
   }
   check(exports.some(match => match[1] === 'EntryAbility' && match[2] === 'default'), 'EntryAbility default export must remain');
-  for (const field of ['defaultOrder', 'speed', 'sound', 'haptics', 'beginnerGuides', 'order', 'durationMs', 'moves', 'date', 'onForegroundChanged']) {
+  for (const field of ['defaultOrder', 'speed', 'sound', 'haptics', 'beginnerGuides', 'order', 'durationMs', 'moves', 'date',
+    'challengeId', 'assisted', 'teachingRecords', 'onForegroundChanged']) {
     check(disassembly.includes(`"${field}"`), `${field} must retain its runtime property name`);
   }
   const list = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
@@ -136,12 +141,33 @@ try {
     }
   }
 
+  const teachingSource = readFileSync(join(intermediate, 'model/CubeTeaching.ts'), 'utf8');
+  const teachingImports = [...teachingSource.matchAll(/"(@bundle:[^"\r\n]+\/model\/CubeModel)"/g)];
+  check(teachingImports.length === 2, 'compiled teaching catalogue must use the actual model imports');
+  const teachingUrl = moduleUrl(teachingSource.replaceAll(teachingImports[0][0], JSON.stringify(modelUrl)));
+  const teachingModule = await import(teachingUrl);
+  const challenges = teachingModule[symbols.createTeachingChallenges]();
+  check(challenges.length === 8, 'Release must retain all eight teaching challenges');
+  for (const challenge of challenges) {
+    const cube = new CubeModel(5);
+    challenge.load(cube);
+    check(cube.order === challenge.order && !cube.isSolved(), `${challenge.id}: Release setup must be unsolved`);
+    check(cube.moveCount === 0 && cube.undo() === null, `${challenge.id}: setup must remain uncounted`);
+    for (const move of cube.getSolution()) cube.applyMove(move);
+    check(cube.isSolved(), `${challenge.id}: Release history solution must restore all six faces`);
+  }
+
   const storageSource = readFileSync(join(intermediate, 'storage/CubeStore.ts'), 'utf8');
   check(storageSource.includes('import preferences from "@ohos:data.preferences";'), 'compiled preferences import must be recognized');
+  const storageTeachingImports = [...storageSource.matchAll(/"(@bundle:[^"\r\n]+\/model\/CubeTeaching)"/g)];
+  check(storageTeachingImports.length === 2, 'compiled storage must validate against the actual teaching catalogue');
   const preferencesUrl = moduleUrl('export default { getPreferences(context, options) { return context.open(options); } };');
-  const storageModule = await import(moduleUrl(storageSource.replace('"@ohos:data.preferences"', JSON.stringify(preferencesUrl))));
+  const storageModule = await import(moduleUrl(storageSource
+    .replaceAll(storageTeachingImports[0][0], JSON.stringify(teachingUrl))
+    .replace('"@ohos:data.preferences"', JSON.stringify(preferencesUrl))));
   const CubeStore = storageModule[symbols.CubeStore];
   const SolveRecord = storageModule[symbols.SolveRecord];
+  const TeachingRecord = storageModule[symbols.TeachingRecord];
   for (const legacy of [true, false]) {
     const settings = { defaultOrder: 5, speed: 1.7, sound: true, haptics: false };
     if (!legacy) settings.beginnerGuides = false;
@@ -165,7 +191,20 @@ try {
     await reloaded.load(context);
     assert.deepEqual(plain(reloaded.settings), expected);
     assert.deepEqual(plain(reloaded.records), [plain(next), record]);
-    checks += 5;
+    assert.deepEqual(plain(reloaded.teachingRecords), []);
+    const achievement = new TeachingRecord(challenges[0].id, 4567, 3, false, 3000);
+    await reloaded.addTeachingRecord(achievement);
+    await reloaded.addTeachingRecord(new TeachingRecord(challenges[0].id, 1, 1, true, 4000));
+    const teachingReloaded = new CubeStore();
+    await teachingReloaded.load(context);
+    assert.deepEqual(plain(teachingReloaded.teachingRecords), [plain(achievement)]);
+    assert.deepEqual(plain(teachingReloaded.records), [plain(next), record]);
+    await teachingReloaded.clearRecords();
+    const afterClear = new CubeStore();
+    await afterClear.load(context);
+    assert.deepEqual(plain(afterClear.records), []);
+    assert.deepEqual(plain(afterClear.teachingRecords), [plain(achievement)]);
+    checks += 10;
   }
   console.log(JSON.stringify({ status: 'passed', checks, pixelQuantizedGuides: guides, symbols,
     abcBytes: abc.length, abcSha256: digest(abc), unsignedHapSha256: digest(readFileSync(hap)), signedMatches,

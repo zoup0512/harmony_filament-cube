@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
 import test from 'node:test';
+import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
@@ -24,11 +25,12 @@ function member(name) {
 }
 
 const methods = ['tr', 'setHint', 'onLanguageChanged', 'updateLessonHint', 'moveLabel', 'faceMove', 'sameMove',
-  'phaseLabel', 'orderDescription', 'toast'].map(member).join('\n');
+  'phaseLabel', 'orderDescription', 'toast', 'teachingStatus', 'teachingBest', 'formatTime'].map(member).join('\n');
 const harnessSource = stripTypeScriptTypes(`class LocalizedPage {
   language = 'zh-CN'; textLanguage = ''; textCache = new Map(); hintKey = ''; hintArgs = [];
   hint = ''; storageWarning = ''; phase = 'idle'; busy = false; queueKind = ''; assisted = false;
   order = 5; lessonIndex = 0; lessonTotal = 1; lesson = []; hintMove = null;
+  challengeIndex = -1; challenges = createTeachingChallenges(); teachingRecords = [];
   firstFaces = ['U', "U'", 'D', "D'", 'L', "L'"];
   secondFaces = ['R', "R'", 'F', "F'", 'B', "B'"];
   resetGuide() {}
@@ -38,7 +40,8 @@ ${methods}
 function harness(locale = 'zh-CN') {
   const calls = [];
   const errors = [];
-  const context = { hilog: { error: (...args) => errors.push(args) }, CubeMove: class {
+  const context = { TeachingChallenge, createTeachingChallenges,
+    hilog: { error: (...args) => errors.push(args) }, CubeMove: class {
     constructor(axis, layer, turns) { Object.assign(this, { axis, layer, turns }); }
   }};
   vm.runInNewContext(harnessSource, context);
@@ -187,6 +190,73 @@ test('tutorial and history inner-layer labels are regenerated rather than retain
   assert.doesNotMatch(page.hint, /[\u3400-\u9fff]/);
   assert.equal(page.busy, true);
   assert.equal(page.phase, 'playing');
+});
+
+test('teaching history hints regenerate inner-layer labels across locale changes without resetting assistance', () => {
+  const { page } = harness();
+  const move = { axis: 'x', layer: 1, turns: 1 };
+  page.challengeIndex = 4;
+  page.phase = 'playing';
+  page.assisted = true;
+  page.hintMove = move;
+  page.setHint('teaching_history_hint', page.moveLabel(move));
+  assert.match(page.hint, /X 第 2 层/);
+  assert.match(page.hint, /提示通关/);
+  for (const locale of ['en', 'en-US', 'en-GB']) {
+    page.language = locale;
+    page.onLanguageChanged();
+    assert.match(page.hint, /^Solve reference: X layer 2 \+90°\./);
+    assert.match(page.hint, /solved with hints/);
+    assert.doesNotMatch(page.hint, /[\u3400-\u9fff]/);
+    assert.equal(page.hintKey, 'teaching_history_hint');
+    assert.equal(page.hintMove, move);
+    assert.equal(page.challengeIndex, 4);
+    assert.equal(page.phase, 'playing');
+    assert.equal(page.assisted, true);
+  }
+  page.language = 'zh-CN';
+  page.onLanguageChanged();
+  assert.match(page.hint, /X 第 2 层/);
+});
+
+test('all real teaching metadata and dynamic difficulty keys exist in every locale', () => {
+  const challenges = createTeachingChallenges();
+  assert.equal(challenges.length, 8);
+  const metadata = new Set();
+  for (const challenge of challenges) {
+    assert.ok(challenge instanceof TeachingChallenge);
+    for (const key of [challenge.titleKey, challenge.descriptionKey, challenge.tipKey]) {
+      assert.equal(metadata.has(key), false, `distinct teaching metadata: ${key}`);
+      metadata.add(key);
+      for (const locale of locales) {
+        assert.equal(typeof strings[locale][key], 'string', `${locale}: ${key}`);
+        assert.ok(strings[locale][key].trim(), `${locale}: ${key}`);
+        assert.doesNotMatch(strings[locale][key], /%\d+\$[sd]/, 'metadata is formatted without arguments');
+      }
+    }
+    for (const locale of locales) assert.ok(strings[locale][`teaching_difficulty_${challenge.difficulty}`]);
+  }
+  assert.equal(metadata.size, 24);
+});
+
+test('teaching progress, best and status captions use real formatter arguments and refresh language', () => {
+  const { page } = harness('en-GB');
+  const challenge = page.challenges[0];
+  assert.equal(page.tr('teaching_level_details', 2, 1), '2×2 · Reference quarter turns: 1');
+  assert.equal(page.tr('teaching_progress', 1, 8), '1/8 completed');
+  assert.equal(page.teachingStatus(challenge), strings.en.teaching_status_new);
+  assert.equal(page.teachingBest(challenge), '');
+  page.teachingRecords = [{ challengeId: challenge.id, moves: 3, durationMs: 1234, assisted: true }];
+  assert.equal(page.teachingStatus(challenge), strings.en.teaching_status_guided);
+  assert.equal(page.teachingBest(challenge), 'Best · Moves: 3 · Time: 00:01.23');
+  page.teachingRecords[0].assisted = false;
+  assert.equal(page.teachingStatus(challenge), strings.en.teaching_status_solved);
+  page.setHint('teaching_save_failed');
+  page.language = 'zh-CN';
+  page.onLanguageChanged();
+  assert.equal(page.hint, strings.base.teaching_save_failed);
+  assert.equal(page.teachingStatus(challenge), strings.base.teaching_status_solved);
+  assert.equal(page.teachingBest(challenge), '最佳：3 步 · 00:01.23');
 });
 
 test('a transient tutorial message is not replaced by the step message on language changes', () => {

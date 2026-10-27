@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
 import { setImmediate as nextTurn } from 'node:timers/promises';
+import { createTeachingChallenges } from './teaching-helper.mjs';
 
 const dataURL = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const source = await readFile(new URL('../entry/src/main/ets/storage/CubeStore.ets', import.meta.url), 'utf8');
@@ -12,7 +13,8 @@ const kitMocks = {
   '@kit.ArkData': dataURL(`export const preferences = {
     getPreferences(context, options) { return context.open(options); }
   };`),
-  '@kit.AbilityKit': dataURL('export const common = {};')
+  '@kit.AbilityKit': dataURL('export const common = {};'),
+  '../model/CubeTeaching': new URL('./teaching-helper.mjs', import.meta.url).href
 };
 let rewritten = source;
 for (const [specifier, replacement] of Object.entries(kitMocks)) {
@@ -20,7 +22,7 @@ for (const [specifier, replacement] of Object.entries(kitMocks)) {
   assert.equal([...rewritten.matchAll(pattern)].length, 1, `expected one ${specifier} import`);
   rewritten = rewritten.replace(pattern, JSON.stringify(replacement));
 }
-const { CubeStore, CubeSettings, SolveRecord, default: DefaultStore } = await import(
+const { CubeStore, CubeSettings, SolveRecord, TeachingRecord, default: DefaultStore } = await import(
   dataURL(stripTypeScriptTypes(rewritten, { mode: 'strip' }))
 );
 
@@ -73,7 +75,8 @@ async function loaded(initial = {}) {
   const store = new CubeStore();
   await store.load(mock.context);
   assert.deepEqual(mock.calls, [
-    ['open', { name: 'cube_store' }], ['get', 'settings', ''], ['get', 'records', '']
+    ['open', { name: 'cube_store' }], ['get', 'settings', ''], ['get', 'records', ''],
+    ['get', 'teaching_records', '']
   ], 'load must only read preferences, never write or flush');
   mock.calls.length = 0;
   return { store, ...mock };
@@ -124,7 +127,8 @@ test('exports, independent defaults, record constructor, and empty preferences',
   await first.load(mock.context);
   assert.deepEqual(state(first), { settings: defaults, records: [] });
   assert.deepEqual(mock.calls, [
-    ['open', { name: 'cube_store' }], ['get', 'settings', ''], ['get', 'records', '']
+    ['open', { name: 'cube_store' }], ['get', 'settings', ''], ['get', 'records', ''],
+    ['get', 'teaching_records', '']
   ]);
 });
 
@@ -269,7 +273,7 @@ test('queued load and writes wait for put and flush; caller inputs are snapshott
   releaseOpen.resolve();
   await putEntered.promise;
   await nextTurn();
-  assert.deepEqual(mock.calls.slice(3), [['put', 'settings', JSON.stringify(expectedSettings)]]);
+  assert.deepEqual(mock.calls.slice(4), [['put', 'settings', JSON.stringify(expectedSettings)]]);
   assert.deepEqual(state(store), { settings: defaults, records: [] });
   releasePut.resolve();
   await flushEntered.promise;
@@ -278,7 +282,7 @@ test('queued load and writes wait for put and flush; caller inputs are snapshott
   assert.deepEqual(state(store), { settings: defaults, records: [] }, 'publish only after flush succeeds');
   releaseFlush.resolve();
   await done;
-  assert.deepEqual(mock.calls.slice(3), [
+  assert.deepEqual(mock.calls.slice(4), [
     ['put', 'settings', JSON.stringify(expectedSettings)], ['flush'],
     ['put', 'records', JSON.stringify([expectedRecord])], ['flush'],
     ['put', 'records', JSON.stringify([expectedRecord, olderRecord])], ['flush'],
@@ -418,4 +422,315 @@ test('all write APIs reject before load; loading afterward recovers the rejected
   await store.addRecord(record());
   await store.clearRecords();
   assert.deepEqual(state(store), { settings: settings({ defaultOrder: 2 }), records: [] });
+});
+
+const teachingRecord = overrides => ({
+  challengeId: 'first-turn', durationMs: 1234.5, moves: 3, assisted: true, date: 100, ...overrides
+});
+const fullState = store => plain({ ...state(store), teachingRecords: store.teachingRecords });
+const invalidTeachingRecords = invalidObjects(teachingRecord(), {
+  challengeId: ['', 'unknown', 'First-turn', 'teaching_first_turn', '__proto__', 1, null, true],
+  durationMs: [-1, NaN, Infinity, -Infinity, '123', null, true],
+  moves: [-1, 0.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, '3', null, true],
+  assisted: [0, 1, 'false', 'true', null, [], {}],
+  date: [-1, 0.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, '100', null, true]
+});
+
+test('teaching exports, independent defaults, constructor, and legacy preferences', async () => {
+  const first = new CubeStore();
+  const second = new CubeStore();
+  assert.deepEqual(first.teachingRecords, []);
+  assert.notEqual(first.teachingRecords, second.teachingRecords);
+  const value = new TeachingRecord('edge-cycle', 0, 0, false, 0);
+  assert.deepEqual(plain(value), teachingRecord({
+    challengeId: 'edge-cycle', durationMs: 0, moves: 0, assisted: false, date: 0
+  }));
+  const before = Date.now();
+  const automatic = new TeachingRecord('first-turn', 10, 1, true);
+  assert.ok(automatic.date >= before && automatic.date <= Date.now());
+  const oldSettings = settings({ defaultOrder: 2, speed: 0.5 });
+  const oldRecords = [record({ date: 500 })];
+  const { store, calls, durable } = await loaded({
+    settings: JSON.stringify(oldSettings), records: JSON.stringify(oldRecords)
+  });
+  assert.deepEqual(fullState(store), { settings: oldSettings, records: oldRecords, teachingRecords: [] });
+  assert.deepEqual(calls, []);
+  assert.equal(durable.has('teaching_records'), false, 'legacy load does not rewrite or migrate storage');
+});
+
+test('teaching load strips unknown fields, creates instances, and preserves unrelated records', async () => {
+  const saved = teachingRecord({ challengeId: 'right-slot', assisted: false });
+  const json = JSON.stringify([{ ...saved, ignored: 'not retained' }]);
+  const { store, calls, durable } = await loaded({ teaching_records: json, records: JSON.stringify([record()]) });
+  assert.deepEqual(plain(store.teachingRecords), [saved]);
+  assert.ok(store.teachingRecords[0] instanceof TeachingRecord);
+  assert.deepEqual(plain(store.records), [record()]);
+  assert.deepEqual(calls, []);
+  assert.equal(durable.get('teaching_records'), json, 'load is read-only');
+});
+
+test('malformed teaching preferences default safely without erasing other keys', async () => {
+  const savedSettings = settings({ defaultOrder: 5 });
+  for (const bad of ['', '{broken', '[', 'undefined', 7, false, null, {}, [],
+    ...[null, {}, teachingRecord(), 12, true, 'not an array'].map(value => JSON.stringify(value))]) {
+    const { store } = await loaded({
+      settings: JSON.stringify(savedSettings), records: JSON.stringify([record()]), teaching_records: bad
+    });
+    assert.deepEqual(fullState(store), { settings: savedSettings, records: [record()], teachingRecords: [] });
+  }
+  const progress = teachingRecord({ assisted: false });
+  const { store } = await loaded({ settings: '{broken', records: '{broken', teaching_records: JSON.stringify([progress]) });
+  assert.deepEqual(fullState(store), { settings: defaults, records: [], teachingRecords: [progress] });
+});
+
+test('teaching load discards invalid or unknown entries but preserves valid achievements', async () => {
+  const progress = teachingRecord({ assisted: false });
+  for (const [label, value] of invalidTeachingRecords) {
+    const { store, calls } = await loaded({ teaching_records: JSON.stringify([value, progress]) });
+    assert.deepEqual(plain(store.teachingRecords), [progress], label);
+    assert.deepEqual(calls, [], label);
+  }
+});
+
+test('invalid teaching additions reject without state changes or I/O and do not poison later writes', async () => {
+  const { store, calls } = await loaded({ records: JSON.stringify([record()]) });
+  const before = fullState(store);
+  for (const [label, value] of invalidTeachingRecords) {
+    await assert.rejects(store.addTeachingRecord(value), /Invalid teaching record/, label);
+    assert.deepEqual(fullState(store), before, label);
+  }
+  assert.deepEqual(calls, []);
+  await store.addTeachingRecord(teachingRecord());
+  assert.deepEqual(plain(store.teachingRecords), [teachingRecord()]);
+});
+
+test('teaching accepts every catalogue ID, zero and fractional durations, and safe integer maxima', async () => {
+  const { store, durable } = await loaded();
+  const expected = createTeachingChallenges().map((challenge, index) => teachingRecord({
+    challengeId: challenge.id, durationMs: index === 0 ? 0 : 0.25,
+    moves: index === 0 ? 0 : Number.MAX_SAFE_INTEGER,
+    assisted: index % 2 === 0, date: index === 0 ? 0 : Number.MAX_SAFE_INTEGER
+  }));
+  await Promise.all(expected.toReversed().map(value => store.addTeachingRecord(value)));
+  assert.deepEqual(plain(store.teachingRecords), expected, 'progress is in catalogue order, not completion order');
+  assert.deepEqual(JSON.parse(durable.get('teaching_records')), expected);
+});
+
+test('teaching ranking is independent first, then fewer moves, then shorter duration; ties retain the achievement', async () => {
+  const { store, durable, context } = await loaded();
+  const assisted = teachingRecord({ durationMs: 30, moves: 4 });
+  const fewer = teachingRecord({ durationMs: 1000, moves: 3, date: 110 });
+  const faster = teachingRecord({ durationMs: 10, moves: 3, date: 120 });
+  const independent = teachingRecord({ durationMs: 10000, moves: 100, assisted: false, date: 1 });
+  const independentFewer = teachingRecord({ durationMs: 100000, moves: 99, assisted: false, date: 2 });
+  const independentFaster = teachingRecord({ durationMs: 50, moves: 99, assisted: false, date: 3 });
+  const cases = [
+    [assisted, assisted],
+    [teachingRecord({ durationMs: 1, moves: 5 }), assisted],
+    [fewer, fewer], [faster, faster], [{ ...faster, date: 900 }, faster],
+    [independent, independent],
+    [teachingRecord({ durationMs: 0, moves: 0, date: 1000 }), independent],
+    [{ ...independent, durationMs: 1, moves: 101, date: 1001 }, independent],
+    [independentFewer, independentFewer], [independentFaster, independentFaster],
+    [{ ...independentFaster, date: 1002 }, independentFaster]
+  ];
+  for (const [input, expected] of cases) {
+    await store.addTeachingRecord(input);
+    assert.deepEqual(plain(store.teachingRecords), [expected]);
+    assert.deepEqual(JSON.parse(durable.get('teaching_records')), [expected]);
+  }
+  const reloaded = new CubeStore();
+  await reloaded.load(context);
+  assert.deepEqual(plain(reloaded.teachingRecords), [independentFaster]);
+});
+
+test('teaching load deduplicates known IDs using the same ranking without trusting file order', async () => {
+  const expected = createTeachingChallenges().map((challenge, index) => teachingRecord({
+    challengeId: challenge.id, assisted: false, moves: index + 5, durationMs: 500, date: index + 10
+  }));
+  const values = expected.flatMap(value => [
+    { ...value, assisted: true, moves: 0, durationMs: 0, date: 9999 },
+    { ...value, moves: value.moves + 1, durationMs: 0 },
+    { ...value, durationMs: value.durationMs + 1 }, value
+  ]);
+  for (const entries of [values, values.toReversed()]) {
+    const { store, calls } = await loaded({ teaching_records: JSON.stringify(entries) });
+    assert.deepEqual(plain(store.teachingRecords), expected);
+    assert.equal(store.teachingRecords.length, 8);
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('teaching adds queue behind load, snapshot caller input, and wait for put and flush', { timeout: 5000 }, async t => {
+  const mock = createStorage();
+  const store = new CubeStore();
+  const opened = deferred();
+  const releaseOpen = deferred();
+  const putEntered = deferred();
+  const releasePut = deferred();
+  const flushEntered = deferred();
+  const releaseFlush = deferred();
+  t.after(() => { releaseOpen.resolve(); releasePut.resolve(); releaseFlush.resolve(); });
+  mock.hooks.open = async () => { opened.resolve(); await releaseOpen.promise; };
+  let puts = 0;
+  mock.hooks.put = async () => {
+    if (++puts === 1) { putEntered.resolve(); await releasePut.promise; }
+  };
+  let flushes = 0;
+  mock.hooks.flush = async () => {
+    if (++flushes === 1) { flushEntered.resolve(); await releaseFlush.promise; }
+  };
+  const input = teachingRecord({ unknown: 'ignored' });
+  const saved = teachingRecord();
+  const better = teachingRecord({ assisted: false, moves: 100, durationMs: 100000 });
+  const next = teachingRecord({ challengeId: 'edge-cycle' });
+  const savedSettings = settings({ defaultOrder: 2 });
+  const done = Promise.all([
+    store.load(mock.context), store.addTeachingRecord(input), store.addTeachingRecord(better),
+    store.saveSettings(savedSettings), store.addRecord(record()), store.clearRecords(), store.addTeachingRecord(next)
+  ]);
+  input.challengeId = 'corner-pair';
+  input.durationMs = 0;
+  input.moves = 0;
+  input.assisted = false;
+  input.date = 9999;
+  await opened.promise;
+  await nextTurn();
+  assert.deepEqual(mock.calls, [['open', { name: 'cube_store' }]]);
+  releaseOpen.resolve();
+  await putEntered.promise;
+  await nextTurn();
+  assert.deepEqual(mock.calls.slice(4), [['put', 'teaching_records', JSON.stringify([saved])]]);
+  assert.deepEqual(store.teachingRecords, []);
+  releasePut.resolve();
+  await flushEntered.promise;
+  await nextTurn();
+  assert.equal(puts, 1, 'all writers share the same queue');
+  assert.deepEqual(store.teachingRecords, [], 'publish only after flush succeeds');
+  releaseFlush.resolve();
+  await done;
+  assert.deepEqual(mock.calls.slice(4), [
+    ['put', 'teaching_records', JSON.stringify([saved])], ['flush'],
+    ['put', 'teaching_records', JSON.stringify([better])], ['flush'],
+    ['put', 'settings', JSON.stringify(savedSettings)], ['flush'],
+    ['put', 'records', JSON.stringify([record()])], ['flush'],
+    ['put', 'records', '[]'], ['flush'],
+    ['put', 'teaching_records', JSON.stringify([better, next])], ['flush']
+  ]);
+  assert.deepEqual(fullState(store), { settings: savedSettings, records: [], teachingRecords: [better, next] });
+  assert.deepEqual(JSON.parse(mock.durable.get('teaching_records')), [better, next]);
+});
+
+test('teaching writes copy existing retained values before asynchronous persistence', { timeout: 5000 }, async t => {
+  const initial = teachingRecord({ assisted: false });
+  const { store, hooks, durable } = await loaded({ teaching_records: JSON.stringify([initial]) });
+  const entered = deferred();
+  const release = deferred();
+  t.after(() => release.resolve());
+  hooks.flush = async () => { entered.resolve(); await release.promise; };
+  const oldReference = store.teachingRecords[0];
+  const next = teachingRecord({ challengeId: 'corner-loop' });
+  const saving = store.addTeachingRecord(next);
+  await entered.promise;
+  oldReference.moves = 999;
+  oldReference.assisted = true;
+  next.challengeId = 'edge-cycle';
+  release.resolve();
+  await saving;
+  const expected = [initial, teachingRecord({ challengeId: 'corner-loop' })];
+  assert.deepEqual(plain(store.teachingRecords), expected);
+  assert.deepEqual(JSON.parse(durable.get('teaching_records')), expected);
+  assert.notEqual(store.teachingRecords[0], oldReference);
+});
+
+for (const failureStage of ['put', 'flush']) {
+  test(`teaching ${failureStage} failure rejects its own caller and queued recovery uses committed progress`, { timeout: 5000 }, async t => {
+    const initial = teachingRecord({ moves: 5 });
+    const { store, hooks, calls, durable } = await loaded({
+      records: JSON.stringify([record()]), teaching_records: JSON.stringify([initial])
+    });
+    const before = fullState(store);
+    const error = new Error(`teaching ${failureStage} failed`);
+    const entered = deferred();
+    const release = deferred();
+    t.after(() => release.resolve());
+    let attempts = 0;
+    hooks[failureStage] = async () => {
+      if (++attempts === 1) throw error;
+      entered.resolve();
+      await release.promise;
+    };
+    const rejected = assert.rejects(store.addTeachingRecord(teachingRecord({ assisted: false })), actual => actual === error);
+    const recovered = teachingRecord({ moves: 4 });
+    const recovery = assert.doesNotReject(store.addTeachingRecord(recovered));
+    await rejected;
+    await entered.promise;
+    assert.deepEqual(fullState(store), before, 'failed independent completion must not be published');
+    release.resolve();
+    await recovery;
+    assert.deepEqual(plain(store.teachingRecords), [recovered]);
+    assert.deepEqual(JSON.parse(durable.get('teaching_records')), [recovered]);
+    assert.deepEqual(plain(store.records), [record()]);
+    assert.equal(calls.filter(([name]) => name === 'put').length, 2);
+    assert.equal(calls.filter(([name]) => name === 'flush').length, failureStage === 'put' ? 1 : 2);
+  });
+}
+
+test('a failed teaching read does not publish any partial state or replace the storage handle', async () => {
+  const progress = teachingRecord({ assisted: false });
+  const { store, durable } = await loaded({
+    records: JSON.stringify([record()]), teaching_records: JSON.stringify([progress])
+  });
+  const before = fullState(store);
+  const replacement = createStorage({ settings: JSON.stringify(settings({ defaultOrder: 5 })) });
+  const error = new Error('teaching read failed');
+  replacement.hooks.get = async key => { if (key === 'teaching_records') throw error; };
+  await assert.rejects(store.load(replacement.context), actual => actual === error);
+  assert.deepEqual(fullState(store), before);
+  const better = teachingRecord({ assisted: false, moves: 1 });
+  await store.addTeachingRecord(better);
+  assert.deepEqual(JSON.parse(durable.get('teaching_records')), [better]);
+  assert.equal(replacement.durable.has('teaching_records'), false, 'failed reload keeps the original storage handle');
+  delete replacement.hooks.get;
+  await store.load(replacement.context);
+  assert.deepEqual(store.teachingRecords, [], 'successful load of empty storage replaces old progress');
+});
+
+test('teaching progress is independent of normal history, clearRecords, and settings across reloads', async () => {
+  const progress = teachingRecord({ assisted: false });
+  const savedSettings = settings({ defaultOrder: 5, speed: 1.5 });
+  const { store, calls, durable, context } = await loaded({
+    settings: JSON.stringify(savedSettings), records: JSON.stringify([record()])
+  });
+  const normalReference = store.records;
+  const normalJSON = durable.get('records');
+  await store.addTeachingRecord(progress);
+  assert.equal(store.records, normalReference);
+  assert.equal(durable.get('records'), normalJSON);
+  assert.deepEqual(calls.map(([name, key]) => [name, key]), [['put', 'teaching_records'], ['flush', undefined]]);
+  const progressReference = store.teachingRecords;
+  const progressJSON = durable.get('teaching_records');
+  calls.length = 0;
+  await store.addRecord(record({ date: 200 }));
+  await store.saveSettings(savedSettings);
+  await store.clearRecords();
+  assert.equal(store.teachingRecords, progressReference);
+  assert.equal(durable.get('teaching_records'), progressJSON);
+  assert.equal(calls.some(([name, key]) => name === 'put' && key === 'teaching_records'), false);
+  const reloaded = new CubeStore();
+  await reloaded.load(context);
+  assert.deepEqual(fullState(reloaded), { settings: savedSettings, records: [], teachingRecords: [progress] });
+  await reloaded.addTeachingRecord(teachingRecord({ moves: 0, durationMs: 0, assisted: true, date: 999 }));
+  assert.deepEqual(plain(reloaded.teachingRecords), [progress], 'a guided repeat after reload cannot downgrade independent progress');
+});
+
+test('teaching additions reject before load and recover after loading', async () => {
+  const store = new CubeStore();
+  const mock = createStorage();
+  await assert.rejects(store.addTeachingRecord(teachingRecord()), /CubeStore is not loaded/);
+  assert.deepEqual(store.teachingRecords, []);
+  assert.deepEqual(mock.calls, []);
+  await store.load(mock.context);
+  await store.addTeachingRecord(teachingRecord());
+  assert.deepEqual(plain(store.teachingRecords), [teachingRecord()]);
 });

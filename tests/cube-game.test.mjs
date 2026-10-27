@@ -5,6 +5,7 @@ import test from 'node:test';
 import { Script } from 'node:vm';
 import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
 import { resourceManager } from './resource-helper.mjs';
+import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
 
 // Run with Node 24: node --test tests/cube-game.test.mjs
 // Extract production members verbatim, not a second implementation of the game.
@@ -19,11 +20,13 @@ const names = [
   'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast',
   'loadData', 'saveSettings', 'setBeginnerGuides', 'guideTarget', 'resetGuide',
   'touch', 'layerGestureCurrent', 'setTouchOrigin', 'moveOrbit',
-  'tr', 'setHint', 'onLanguageChanged'
+  'tr', 'setHint', 'onLanguageChanged', 'formatTime', 'bestTime', 'orderSolves',
+  'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge',
+  'teachingStatus', 'teachingBest', 'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startLesson'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
-    `^  private (?:async )?${name}\\([^\\r\\n]*\\)[^\\r\\n]*\\{\\r?\\n[\\s\\S]*?^  \\}`, 'gm'))];
+    `^  (?:private )?(?:async )?${name}\\([^\\r\\n]*\\)[^\\r\\n]*\\{\\r?\\n[\\s\\S]*?^  \\}`, 'gm'))];
   assert.equal(matches.length, 1, `Index.ets must contain exactly one ${name} method`);
   return matches[0][0];
 });
@@ -32,6 +35,7 @@ const members = names.map(name => {
 for (const [name, parameters, pattern] of [
   ['canvasMounted', '', /\.onReady\(\(\) => \{([^\r\n]*)\}\)/],
   ['canvasResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m],
+  ['gameAppeared', '', /\.onAppear\(\(\) => (this\.gameScroller\.scrollTo\(\{ xOffset: 0, yOffset: 0 \}\))\)/],
   ['frontView', '', /\.onClick\(\(\) => \{ (this\.invalidateGesture\(\); this\.yaw = 0\.62;[^\r\n]*) \}\)/]
 ]) {
   const match = source.match(pattern);
@@ -46,10 +50,13 @@ const declarations = fields[1].replace(/@\w+(?:\([^\r\n)]*\))?\s*/g, '');
 const storeSource = readFileSync(new URL('../entry/src/main/ets/storage/CubeStore.ets', import.meta.url), 'utf8');
 const recordClasses = [...storeSource.matchAll(/^export class SolveRecord \{\r?\n[\s\S]*?^\}/gm)];
 assert.equal(recordClasses.length, 1, 'use the real SolveRecord value object');
+const teachingClasses = [...storeSource.matchAll(/^export class TeachingRecord \{\r?\n[\s\S]*?^\}/gm)];
+assert.equal(teachingClasses.length, 1, 'use the real TeachingRecord value object');
 const settingsClasses = [...storeSource.matchAll(/^export class CubeSettings \{\r?\n[\s\S]*?^\}/gm)];
 assert.equal(settingsClasses.length, 1, 'use the real CubeSettings defaults');
 const executable = stripTypeScriptTypes([
   recordClasses[0][0].replace(/^export /, ''),
+  teachingClasses[0][0].replace(/^export /, ''),
   settingsClasses[0][0].replace(/^export /, ''),
   `class GameHarness {\n${declarations}\n${members.join('\n')}\n}`,
   'GameHarness;'
@@ -69,7 +76,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   const timers = new Map();
   const calls = {
     draw: [], getSwipeGuide: [], drawGuide: [], drawBeginnerGuides: [],
-    feedback: [], records: [], pending: [], toasts: [], settings: [], dialogs: []
+    feedback: [], records: [], teachingRecords: [], pending: [], toasts: [], settings: [], dialogs: [], scroll: []
   };
   const guide = guideVisible ? { startX: 100, startY: 120, endX: 150, endY: 140 } : null;
   class FakeDate extends Date {
@@ -78,6 +85,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   }
   class MockStore {
     records = [];
+    teachingRecords = [];
     async load() {}
     async saveSettings(settings) {
       calls.settings.push(settings);
@@ -93,9 +101,19 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
       });
       return deferred.promise;
     }
+    addTeachingRecord(record) {
+      calls.teachingRecords.push(record);
+      const deferred = Promise.withResolvers();
+      calls.pending.push({
+        resolve: () => { this.teachingRecords.push(record); deferred.resolve(); },
+        reject: () => deferred.reject(new Error('mock teaching disk failure'))
+      });
+      return deferred.promise;
+    }
   }
   const GameHarness = script.runInNewContext({
-    CubeModel, CubeMove, TouchType, Date: FakeDate, CubeStore: MockStore,
+    CubeModel, CubeMove, TeachingChallenge, createTeachingChallenges,
+    TouchType, Date: FakeDate, CubeStore: MockStore,
     CubeRenderer: class {
       draw(...args) { calls.draw.push(args); }
       getSwipeGuide(...args) { calls.getSwipeGuide.push(args); return guide; }
@@ -109,6 +127,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
       async prepare() {}
     },
     CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
+    Scroller: class { scrollTo(options) { calls.scroll.push({ ...options }); } },
     setInterval(callback, delay) {
       const id = nextTimer++;
       timers.set(id, { callback, delay });
@@ -208,6 +227,63 @@ async function settle(h, index = 0, success = true) {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function enterTeaching(h, index = 0) {
+  const s = h.state;
+  s.leavePage();
+  s.loaded = true;
+  s.openTeaching();
+  assert.equal(s.page, 'teaching');
+  s.startChallenge(index);
+  assert.equal(s.page, 'game');
+  assert.equal(s.challengeIndex, index);
+  return s.challenges[index];
+}
+
+function solveTeaching(h, solution = h.state.model.getSolution()) {
+  assert.ok(solution.length > 0, 'solve a real unsolved position');
+  for (const move of solution) {
+    assert.equal(h.state.phase === 'ready' || h.state.phase === 'playing', true);
+    h.state.requestMove(move);
+    completeMove(h);
+  }
+  assert.equal(h.state.model.isSolved(), true);
+  assert.equal(h.state.phase, 'solved');
+}
+
+function assertChallengeReady(h, index) {
+  const s = h.state;
+  const challenge = createTeachingChallenges()[index];
+  const expected = new CubeModel(challenge.order);
+  challenge.load(expected);
+  assert.equal(s.page, 'game');
+  assert.equal(s.challengeIndex, index);
+  assert.equal(s.order, challenge.order);
+  assert.equal(s.model.order, challenge.order);
+  assert.equal(snapshot(s.model), snapshot(expected), 'load the exact fixed model position');
+  assert.equal(s.model.isSolved(), false);
+  assert.equal(s.model.undo(), null, 'setup is never a user step');
+  assert.deepEqual(s.model.getSolution(), expected.getSolution(), 'setup retains history-based hints');
+  for (const field of ['moves', 'elapsed', 'timeBase', 'startedAt', 'lessonIndex', 'lessonTotal']) {
+    assert.equal(s[field], 0, field);
+  }
+  assert.equal(s.model.moveCount, 0);
+  assert.equal(s.phase, 'ready');
+  assert.equal(s.busy, false);
+  assert.equal(s.activeMove, null);
+  assert.equal(s.queue.length, 0);
+  assert.equal(s.queueKind, '');
+  assert.equal(s.lesson.length, 0, 'teaching is not the prescribed tutorial');
+  assert.equal(s.assisted, false);
+  assert.equal(s.hintMove, null);
+  assert.equal(s.hintKey, 'teaching_start_hint');
+  assert.equal(s.hint, s.tr('teaching_start_hint'));
+  assert.equal(s.touching, false);
+  assert.equal(s.pointerCount, 0);
+  assert.equal(s.yaw, 0.62);
+  assert.equal(s.pitch, -0.42);
+  assert.equal(s.cubeZoom, 1.12);
 }
 
 for (const order of [2, 3, 4, 5]) {
@@ -1331,3 +1407,739 @@ for (const success of [true, false]) {
     assert.equal(s.hint, assistedHint, 'save callbacks must belong to their originating session');
   });
 }
+
+test('teaching entry requires loaded foreground home and preserves the selected practice order', t => {
+  const h = harness(t, { order: 5 });
+  const { state: s } = h;
+  s.leavePage();
+  assert.equal(s.loaded, false, 'retain the production loading default');
+  const session = s.sessionId;
+  s.openTeaching();
+  assert.equal(s.page, 'home');
+  assert.equal(s.sessionId, session);
+  s.loaded = true;
+  s.foreground = false;
+  s.openTeaching();
+  assert.equal(s.page, 'home');
+  s.foreground = true;
+  for (const page of ['game', 'stats', 'settings', 'teaching']) {
+    s.page = page;
+    s.openTeaching();
+    assert.equal(s.page, page);
+    assert.equal(s.sessionId, session);
+  }
+  s.page = 'home';
+  s.openTeaching();
+  assert.equal(s.page, 'teaching');
+  assert.equal(s.practiceOrder, 5);
+  assert.equal(s.order, 5);
+  assert.equal(s.challengeIndex, -1);
+  assert.ok(s.sessionId > session);
+  assert.equal(s.challenges.length, 8);
+  for (const challenge of s.challenges) assert.ok(challenge instanceof TeachingChallenge);
+  assert.equal(s.onBackPress(), true);
+  assert.equal(s.page, 'home');
+  assert.equal(s.order, 5);
+  assert.equal(s.onBackPress(), false);
+});
+
+test('stale catalogue callbacks cannot enter teaching from home, ordinary practice or unrelated pages', t => {
+  const h = harness(t, { order: 4 });
+  const { state: s } = h;
+  s.loaded = true;
+  for (const page of ['home', 'game', 'stats', 'settings']) {
+    s.page = page;
+    const before = snapshot(s.model);
+    const session = s.sessionId;
+    s.startChallenge(0);
+    assert.equal(s.page, page);
+    assert.equal(s.challengeIndex, -1);
+    assert.equal(s.order, 4);
+    assert.equal(snapshot(s.model), before);
+    assert.equal(s.sessionId, session);
+  }
+});
+
+test('challenge entry rejects unloaded, background, busy and invalid requests without replacing a session', t => {
+  const h = harness(t);
+  enterTeaching(h, 1);
+  const { state: s } = h;
+  const before = snapshot(s.model);
+  const session = s.sessionId;
+  for (const index of [-1, 8, 0.5, NaN, Infinity, '0', null, undefined]) s.startChallenge(index);
+  s.loaded = false;
+  s.startChallenge(0);
+  s.loaded = true;
+  s.foreground = false;
+  s.startChallenge(0);
+  s.foreground = true;
+  assert.equal(s.challengeIndex, 1);
+  assert.equal(s.sessionId, session);
+  assert.equal(snapshot(s.model), before);
+  s.requestMove(s.faceMove('F'));
+  const active = s.activeMove;
+  s.startChallenge(0);
+  assert.equal(s.challengeIndex, 1);
+  assert.equal(s.activeMove, active);
+  assert.equal(s.sessionId, session);
+  assert.equal(snapshot(s.model), before);
+  assert.equal(h.calls.teachingRecords.length, 0);
+});
+
+for (const [index, challenge] of createTeachingChallenges().entries()) {
+  test(`teaching ${challenge.id} loads its fixed position ready with no animation, user steps or clock`, t => {
+    const h = harness(t, { order: 5 });
+    enterTeaching(h, index);
+    assertChallengeReady(h, index);
+    assert.equal(h.state.practiceOrder, 5);
+    assert.equal(h.calls.scroll.length, 0, 'new game Scroll waits for its mount callback');
+    h.state.gameAppeared();
+    assert.deepEqual(h.calls.scroll, [{ xOffset: 0, yOffset: 0 }]);
+    h.state.startTimers();
+    h.clock.advance(30_000);
+    h.clock.fire(h.state.clockTimer);
+    h.clock.fire(h.state.frameTimer);
+    assertChallengeReady(h, index);
+    assertQuiet(h);
+    assert.equal(h.calls.teachingRecords.length, 0);
+    assert.equal(h.state.teachingStatus(challenge), h.state.tr('teaching_status_new'));
+    assert.equal(h.state.teachingBest(challenge), '');
+  });
+
+  test(`teaching ${challenge.id} accepts unrelated free moves without advancing a prescribed lesson or passing`, t => {
+    const h = harness(t);
+    enterTeaching(h, index);
+    const { state: s, clock, calls } = h;
+    const before = snapshot(s.model);
+    const wrong = s.faceMove('D');
+    assert.equal(s.sameMove(wrong, s.model.getSolution()[0]), false);
+    clock.advance(15_000);
+    s.requestMove(wrong);
+    assert.equal(s.busy, true);
+    assert.equal(s.queueKind, 'user');
+    assert.equal(s.phase, 'playing');
+    assert.equal(s.startedAt, clock.now());
+    assert.equal(snapshot(s.model), before);
+    s.finishSolve();
+    assert.equal(calls.teachingRecords.length, 0);
+    completeMove(h);
+    assert.notEqual(snapshot(s.model), before);
+    assert.equal(s.model.isSolved(), false);
+    assert.equal(s.moves, 1);
+    assert.equal(s.model.moveCount, 1);
+    assert.equal(s.lessonIndex, 0);
+    assert.equal(s.lesson.length, 0);
+    assert.equal(s.phase, 'playing');
+    assert.equal(s.assisted, false);
+    s.finishSolve();
+    assert.equal(calls.teachingRecords.length, 0, 'being in playing is not sufficient to pass');
+    assert.equal(calls.records.length, 0);
+    assert.equal(calls.toasts.length, 0, 'free teaching moves are not rejected as wrong tutorial moves');
+    assert.deepEqual(calls.feedback, [[true, true]]);
+  });
+
+  for (const speed of [0.5, 1, 2]) {
+    test(`teaching ${challenge.id} passes only on the final committed real turn (${speed}x)`, async t => {
+      const h = harness(t, { speed });
+      enterTeaching(h, index);
+      const { state: s, clock, calls } = h;
+      const solution = s.model.getSolution();
+      assert.equal(solution.length, challenge.referenceMoves);
+      s.startTimers();
+      clock.advance(9000);
+      clock.fire(s.clockTimer);
+      s.finishSolve();
+      assert.equal(s.phase, 'ready');
+      assert.equal(s.elapsed, 0);
+      assert.equal(calls.teachingRecords.length, 0);
+      const start = clock.now();
+      for (const [step, move] of solution.entries()) {
+        const before = snapshot(s.model);
+        s.requestMove(move);
+        assert.equal(s.startedAt, start);
+        assert.equal(s.busy, true);
+        assert.equal(s.moves, step);
+        clock.advance(220 / speed - 1);
+        s.frame();
+        s.finishSolve();
+        assert.equal(snapshot(s.model), before, 'no partial model commits');
+        assert.equal(s.model.isSolved(), false);
+        assert.equal(s.phase, 'playing');
+        assert.equal(calls.teachingRecords.length, 0, 'no optimistic passing before final frame');
+        clock.advance(1);
+        s.frame();
+        assert.equal(s.moves, step + 1);
+        assert.equal(s.model.moveCount, step + 1);
+        assert.equal(s.busy, false);
+        assert.equal(s.activeMove, null);
+        assert.equal(s.phase, step === solution.length - 1 ? 'solved' : 'playing');
+        assert.equal(calls.records.length, 0, 'teaching never submits a normal solve');
+      }
+      assert.equal(s.model.isSolved(), true);
+      assert.equal(snapshot(s.model), snapshot(new CubeModel(challenge.order)));
+      assert.equal(s.elapsed, solution.length * 220 / speed);
+      assert.equal(calls.feedback.length, solution.length);
+      assert.equal(calls.teachingRecords.length, 1);
+      const record = calls.teachingRecords[0];
+      assert.equal(record.constructor.name, 'TeachingRecord');
+      assert.deepEqual({ ...record }, {
+        challengeId: challenge.id, durationMs: solution.length * 220 / speed,
+        moves: solution.length, assisted: false, date: clock.now()
+      });
+      assert.equal(s.hintKey, 'teaching_saving');
+      assert.equal(s.hint, s.tr('teaching_saving'));
+      assert.equal(s.teachingRecords.length, 0, 'pending saves do not mark stored progress');
+      assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_new'));
+      assert.equal(s.teachingBest(challenge), '');
+      const passed = snapshot(s.model);
+      for (let i = 0; i < 3; i++) {
+        s.finishSolve();
+        s.requestMove(s.faceMove('R'));
+        s.undo();
+        s.showHint();
+        clock.advance(1000);
+        s.frame();
+        clock.fire(s.clockTimer);
+      }
+      assert.equal(snapshot(s.model), passed, 'passed teaching board is frozen');
+      assert.equal(s.moves, solution.length);
+      assert.equal(s.elapsed, solution.length * 220 / speed);
+      assert.equal(s.phase, 'solved');
+      assert.equal(s.busy, false);
+      assert.equal(s.assisted, false);
+      assert.equal(calls.feedback.length, solution.length);
+      assert.equal(calls.teachingRecords.length, 1, 'finishSolve is idempotent');
+      await settle(h);
+      assert.equal(s.teachingRecords.length, 1);
+      assert.equal(s.teachingRecords[0], record);
+      assert.notEqual(s.teachingRecords, s.store.teachingRecords);
+      assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_solved'));
+      assert.equal(s.teachingBest(challenge), s.tr('teaching_best', solution.length, s.formatTime(record.durationMs)));
+      assert.equal(s.hintKey, 'teaching_saved');
+      assert.equal(s.hint, s.tr('teaching_saved'));
+      assert.equal(s.records.length, 0);
+      assert.equal(s.bestTime(challenge.order), '—');
+      assert.equal(s.orderSolves(challenge.order), 0);
+    });
+  }
+}
+
+test('teaching accepts three same turns instead of the reference inverse, based on real six-face state', async t => {
+  const h = harness(t);
+  const challenge = enterTeaching(h);
+  const { state: s, calls } = h;
+  const turn = challenge.setupMoves()[0];
+  assert.equal(s.sameMove(turn, s.model.getSolution()[0]), false);
+  solveTeaching(h, [turn, turn, turn]);
+  assert.equal(s.moves, 3);
+  assert.equal(s.assisted, false);
+  assert.ok(s.model.getSolution().length > 0, 'an unreduced history is not the passing criterion');
+  assert.equal(calls.teachingRecords.length, 1);
+  assert.equal(calls.teachingRecords[0].moves, 3);
+  assert.equal(calls.teachingRecords[0].assisted, false);
+  assert.equal(calls.records.length, 0);
+  await settle(h);
+});
+
+test('teaching hints mark guidance immediately and a real solve still saves teaching only', async t => {
+  const h = harness(t, { canvasReady: true });
+  const challenge = enterTeaching(h, 4);
+  const { state: s, calls } = h;
+  s.canvasMounted();
+  const before = snapshot(s.model);
+  s.showHint();
+  assert.equal(s.assisted, true);
+  assert.equal(s.phase, 'ready');
+  assert.equal(s.startedAt, 0);
+  assert.equal(s.elapsed, 0);
+  assert.equal(snapshot(s.model), before);
+  assert.equal(s.hintKey, 'teaching_history_hint');
+  assert.equal(s.hint, s.tr('teaching_history_hint', s.moveLabel(s.hintMove)));
+  assert.match(s.hint, /提示通关/);
+  assert.doesNotMatch(s.hint, /不计入成绩|不记录成绩/);
+  assert.equal(calls.getSwipeGuide.at(-1)[0], s.hintMove);
+  solveTeaching(h);
+  assert.equal(s.hintMove, null);
+  assert.equal(s.assisted, true, 'clearing the hand must not clear assistance');
+  assert.equal(calls.teachingRecords.length, 1);
+  assert.equal(calls.teachingRecords[0].assisted, true);
+  assert.equal(calls.records.length, 0);
+  await settle(h);
+  assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_guided'));
+  assert.equal(s.records.length, 0);
+});
+
+test('teaching entry, hints and completion leave existing normal statistics unchanged', async t => {
+  const h = harness(t, { order: 4 });
+  const { state: s, calls } = h;
+  const { inverse } = oneMoveAway(h);
+  s.requestMove(inverse);
+  completeMove(h);
+  await settle(h);
+  const ranked = s.records[0];
+  enterTeaching(h);
+  s.showHint();
+  solveTeaching(h);
+  await settle(h, 1);
+  assert.equal(s.records.length, 1);
+  assert.equal(s.records[0], ranked);
+  assert.equal(s.store.records[0], ranked);
+  assert.equal(calls.records.length, 1);
+  assert.equal(calls.teachingRecords.length, 1);
+  assert.equal(s.orderSolves(4), 1);
+  assert.equal(s.bestTime(4), '00:00.22');
+  for (const order of [2, 3, 5]) {
+    assert.equal(s.orderSolves(order), 0);
+    assert.equal(s.bestTime(order), '—');
+  }
+});
+
+test('retry reloads the exact baseline and clears timer, counters, hint, assistance, history and pending gesture', t => {
+  const h = harness(t, { order: 5, canvasReady: true });
+  enterTeaching(h, 2);
+  const { state: s, clock, calls } = h;
+  s.canvasMounted();
+  s.requestMove(s.faceMove('D'));
+  completeMove(h);
+  clock.advance(800);
+  s.foreground = false;
+  s.onForegroundChanged();
+  assert.equal(s.timeBase, 1020);
+  clock.advance(50_000);
+  s.foreground = true;
+  s.onForegroundChanged();
+  s.showHint();
+  assert.equal(s.assisted, true);
+  s.yaw = 1.3;
+  s.pitch = 0.8;
+  s.retryChallenge();
+  const session = s.sessionId;
+  const before = snapshot(s.model);
+  assert.equal(calls.dialogs.length, 1);
+  assert.equal(calls.dialogs[0].title, s.tr('teaching_retry_title'));
+  assert.equal(calls.dialogs[0].message, s.tr('teaching_retry_message'));
+  assert.equal(snapshot(s.model), before, 'opening retry does not mutate the challenge');
+  touch(h, TouchType.Down);
+  assert.equal(s.touching, true);
+  calls.dialogs[0].secondaryButton.action();
+  assert.ok(s.sessionId > session);
+  assert.equal(s.canvasReady, true, 'same game page retains its ready canvas');
+  assert.deepEqual(calls.scroll, [{ xOffset: 0, yOffset: 0 }], 'retry reveals the restored position and goal');
+  assert.equal(s.practiceOrder, 5);
+  assertChallengeReady(h, 2);
+  assert.equal(s.model.redo(), null);
+  assert.equal(s.downModel, null);
+  touch(h, TouchType.Move, 180, 120);
+  touch(h, TouchType.Up, 180, 120);
+  clock.advance(10_000);
+  clock.fire(s.clockTimer);
+  s.frame();
+  assertChallengeReady(h, 2);
+  assert.equal(calls.teachingRecords.length, 0);
+  assert.equal(calls.records.length, 0);
+});
+
+test('retry confirmation cancels and rejects busy, background and stale actions', t => {
+  const h = harness(t);
+  enterTeaching(h, 1);
+  const { state: s, calls } = h;
+  s.requestMove(s.faceMove('D'));
+  completeMove(h);
+  s.showHint();
+  const before = snapshot(s.model);
+  const session = s.sessionId;
+  const hint = s.hint;
+  s.retryChallenge();
+  calls.dialogs[0].primaryButton.action();
+  assert.equal(snapshot(s.model), before);
+  assert.equal(s.sessionId, session);
+  assert.equal(s.hint, hint);
+  assert.equal(s.assisted, true);
+  s.retryChallenge();
+  const confirm = calls.dialogs[1].secondaryButton.action;
+  s.requestMove(s.faceMove('F'));
+  const active = s.activeMove;
+  confirm();
+  s.retryChallenge();
+  assert.equal(s.activeMove, active);
+  assert.equal(s.sessionId, session);
+  assert.equal(calls.dialogs.length, 2);
+  completeMove(h);
+  const afterMove = snapshot(s.model);
+  s.foreground = false;
+  confirm();
+  s.retryChallenge();
+  assert.equal(snapshot(s.model), afterMove);
+  assert.equal(s.sessionId, session);
+  assert.equal(calls.dialogs.length, 2);
+  s.foreground = true;
+  s.startChallenge(3);
+  confirm();
+  assertChallengeReady(h, 3);
+  s.leaveChallenge();
+  const catalogueSession = s.sessionId;
+  confirm();
+  s.retryChallenge();
+  assert.equal(s.page, 'teaching');
+  assert.equal(s.sessionId, catalogueSession);
+});
+
+test('ready and solved retry do not ask to discard progress and preserve saved achievements', async t => {
+  const h = harness(t);
+  const challenge = enterTeaching(h);
+  const { state: s, calls } = h;
+  const initialSession = s.sessionId;
+  s.retryChallenge();
+  assertChallengeReady(h, 0);
+  assert.ok(s.sessionId > initialSession);
+  solveTeaching(h);
+  await settle(h);
+  const record = s.teachingRecords[0];
+  s.retryChallenge();
+  assertChallengeReady(h, 0);
+  assert.equal(calls.dialogs.length, 0);
+  assert.equal(s.teachingRecords[0], record);
+  assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_solved'));
+});
+
+for (const phase of ['ready', 'playing', 'solved']) {
+  test(`legacy scramble, tutorial and automated reset are blocked in teaching ${phase}`, t => {
+    const h = harness(t);
+    enterTeaching(h);
+    const { state: s, calls } = h;
+    if (phase === 'playing') {
+      s.requestMove(s.faceMove('D'));
+      completeMove(h);
+    } else if (phase === 'solved') solveTeaching(h);
+    const before = snapshot(s.model);
+    const session = s.sessionId;
+    const hint = s.hint;
+    const moves = s.moves;
+    for (const action of ['scramble', 'doScramble', 'startLesson', 'doLesson', 'confirmReset', 'resetStepByStep']) {
+      s[action]();
+      assert.equal(snapshot(s.model), before, action);
+      assert.equal(s.sessionId, session, action);
+      assert.equal(s.challengeIndex, 0, action);
+      assert.equal(s.phase, phase, action);
+      assert.equal(s.hint, hint, action);
+      assert.equal(s.moves, moves, action);
+      assert.equal(s.busy, false, action);
+      assert.equal(s.queue.length, 0, action);
+      assert.equal(s.lesson.length, 0, action);
+    }
+    assert.equal(calls.dialogs.length, 0);
+  });
+}
+
+test('next requires an actually passed challenge, ignores background input and returns the last level to catalogue', t => {
+  const h = harness(t, { order: 5 });
+  enterTeaching(h);
+  const { state: s, clock, calls } = h;
+  const session = s.sessionId;
+  s.nextChallenge();
+  assert.equal(s.sessionId, session);
+  assertChallengeReady(h, 0);
+  s.requestMove(s.model.getSolution()[0]);
+  s.nextChallenge();
+  assert.equal(s.challengeIndex, 0);
+  assert.equal(s.busy, true);
+  completeMove(h, 219);
+  s.nextChallenge();
+  assert.equal(s.challengeIndex, 0);
+  completeMove(h, 1);
+  s.foreground = false;
+  s.nextChallenge();
+  assert.equal(s.challengeIndex, 0);
+  assert.equal(s.phase, 'solved');
+  s.foreground = true;
+  s.nextChallenge();
+  assertChallengeReady(h, 1);
+  assert.deepEqual(calls.scroll, [{ xOffset: 0, yOffset: 0 }], 'next reveals the new position and goal');
+  assert.equal(s.practiceOrder, 5);
+  s.startChallenge(s.challenges.length - 1);
+  solveTeaching(h);
+  assert.equal(calls.teachingRecords.length, 2);
+  s.nextChallenge();
+  assert.equal(s.page, 'teaching');
+  assert.equal(s.challengeIndex, -1);
+  assert.equal(s.order, 5);
+  assert.equal(s.model.order, 5);
+  assert.equal(s.model.isSolved(), true);
+  assert.equal(s.cubeZoom, 1);
+  const catalogueSession = s.sessionId;
+  clock.advance(1000);
+  s.nextChallenge();
+  assert.equal(s.sessionId, catalogueSession);
+  assert.equal(s.page, 'teaching');
+});
+
+for (const practiceOrder of [2, 3, 4, 5]) {
+  test(`teaching back hierarchy restores ${practiceOrder}x${practiceOrder} and cancels in-flight turns only after confirmation`, t => {
+    const h = harness(t, { order: practiceOrder });
+    enterTeaching(h, 4);
+    const { state: s, calls, clock } = h;
+    s.requestMove(s.faceMove('D'));
+    clock.advance(100);
+    s.frame();
+    const before = snapshot(s.model);
+    const active = s.activeMove;
+    const session = s.sessionId;
+    assert.equal(s.onBackPress(), true);
+    assert.equal(calls.dialogs[0].title, s.tr('teaching_leave_title'));
+    assert.equal(calls.dialogs[0].message, s.tr('teaching_leave_message'));
+    calls.dialogs[0].primaryButton.action();
+    assert.equal(s.page, 'game');
+    assert.equal(s.sessionId, session);
+    assert.equal(s.activeMove, active);
+    assert.equal(snapshot(s.model), before);
+    assert.equal(s.onBackPress(), true);
+    calls.dialogs[1].secondaryButton.action();
+    assert.equal(s.page, 'teaching');
+    assert.equal(s.order, practiceOrder);
+    assert.equal(s.model.order, practiceOrder);
+    assert.equal(s.challengeIndex, -1);
+    assert.equal(s.phase, 'idle');
+    assert.equal(s.busy, false);
+    assert.equal(s.activeMove, null);
+    assert.equal(s.queue.length, 0);
+    assert.equal(s.moves, 0);
+    assert.equal(s.startedAt, 0);
+    assert.equal(s.elapsed, 0);
+    assert.equal(s.canvasReady, false);
+    const left = snapshot(s.model);
+    clock.advance(1000);
+    s.frame();
+    assert.equal(snapshot(s.model), left, 'canceled animation cannot commit after departure');
+    assert.equal(s.onBackPress(), true);
+    assert.equal(s.page, 'home');
+    assert.equal(s.order, practiceOrder);
+    assert.equal(s.model.order, practiceOrder);
+    assert.equal(s.onBackPress(), false);
+    assert.equal(calls.dialogs.length, 2);
+    assert.equal(calls.teachingRecords.length, 0);
+    assert.equal(calls.records.length, 0);
+  });
+}
+
+test('leave confirmation ignores background and stale callbacks without destroying a new challenge', t => {
+  const h = harness(t);
+  enterTeaching(h, 1);
+  const { state: s, calls } = h;
+  s.requestMove(s.faceMove('D'));
+  completeMove(h);
+  s.goHome();
+  const confirm = calls.dialogs[0].secondaryButton.action;
+  const before = snapshot(s.model);
+  s.foreground = false;
+  confirm();
+  assert.equal(s.page, 'game');
+  assert.equal(snapshot(s.model), before);
+  s.foreground = true;
+  s.startChallenge(2);
+  confirm();
+  assertChallengeReady(h, 2);
+  s.goHome();
+  assert.equal(s.page, 'teaching', 'ready challenge can leave without confirmation');
+  confirm();
+  assert.equal(s.page, 'teaching');
+  assert.equal(calls.dialogs.length, 1);
+});
+
+for (const destination of ['retry', 'next', 'catalogue', 'home']) {
+  test(`late teaching save success updates progress without replacing the ${destination} session or hint`, async t => {
+    const h = harness(t, { order: 4 });
+    const challenge = enterTeaching(h);
+    const { state: s, calls } = h;
+    solveTeaching(h);
+    const oldSession = s.sessionId;
+    if (destination === 'retry') s.retryChallenge();
+    else if (destination === 'next') s.nextChallenge();
+    else {
+      s.goHome();
+      if (destination === 'home') s.goHome();
+    }
+    const hint = s.hint;
+    const hintKey = s.hintKey;
+    const phase = s.phase;
+    const page = s.page;
+    const before = snapshot(s.model);
+    assert.ok(s.sessionId > oldSession);
+    await settle(h);
+    assert.equal(s.teachingRecords.length, 1);
+    assert.equal(s.teachingRecords[0], calls.teachingRecords[0]);
+    assert.notEqual(s.teachingRecords, s.store.teachingRecords);
+    assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_solved'));
+    assert.equal(s.hint, hint);
+    assert.equal(s.hintKey, hintKey);
+    assert.equal(s.phase, phase);
+    assert.equal(s.page, page);
+    assert.equal(snapshot(s.model), before);
+    assert.equal(s.records.length, 0);
+    assert.equal(calls.toasts.length, 0);
+  });
+}
+
+for (const success of [true, false]) {
+  test(`late teaching save ${success ? 'success' : 'failure'} cannot overwrite a newer solved guided attempt`, async t => {
+    const h = harness(t);
+    const first = enterTeaching(h);
+    const { state: s, calls } = h;
+    solveTeaching(h);
+    s.nextChallenge();
+    const second = s.challenges[1];
+    s.showHint();
+    solveTeaching(h);
+    assert.equal(s.assisted, true);
+    assert.equal(calls.pending.length, 2);
+    const hint = s.hint;
+    await settle(h, 0, success);
+    assert.equal(s.hint, hint);
+    assert.equal(s.hintKey, 'teaching_saving');
+    assert.equal(s.phase, 'solved');
+    assert.equal(s.challengeIndex, 1);
+    assert.equal(s.teachingStatus(first), s.tr(success ? 'teaching_status_solved' : 'teaching_status_new'));
+    assert.equal(s.teachingStatus(second), s.tr('teaching_status_new'));
+    if (!success) assert.deepEqual(calls.toasts, [s.tr('teaching_previous_save_failed')]);
+    await settle(h, 1);
+    assert.equal(s.teachingStatus(second), s.tr('teaching_status_guided'));
+    assert.equal(s.hintKey, 'teaching_saved');
+    assert.equal(calls.records.length, 0);
+  });
+}
+
+for (const leave of [false, true]) {
+  test(`failed teaching save ${leave ? 'after leaving' : 'while passed'} never marks unsaved progress`, async t => {
+    const h = harness(t);
+    const challenge = enterTeaching(h);
+    const { state: s, calls } = h;
+    solveTeaching(h);
+    const passed = snapshot(s.model);
+    if (leave) s.goHome();
+    const hint = s.hint;
+    await settle(h, 0, false);
+    assert.equal(s.teachingRecords.length, 0);
+    assert.equal(s.store.teachingRecords.length, 0);
+    assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_new'));
+    assert.equal(s.teachingBest(challenge), '');
+    assert.equal(calls.teachingRecords.length, 1);
+    assert.equal(calls.records.length, 0);
+    if (leave) {
+      assert.equal(s.page, 'teaching');
+      assert.equal(s.hint, hint);
+      assert.deepEqual(calls.toasts, [s.tr('teaching_previous_save_failed')]);
+    } else {
+      assert.equal(s.phase, 'solved');
+      assert.equal(snapshot(s.model), passed);
+      assert.equal(s.moves, 1);
+      assert.equal(s.hintKey, 'teaching_save_failed');
+      assert.equal(s.hint, s.tr('teaching_save_failed'));
+      assert.match(s.hint, /本关已完成.*未能保存/);
+      assert.equal(calls.toasts.length, 0);
+    }
+  });
+}
+
+test('loadData restores teaching progress separately from normal results and does not unlock a session', async t => {
+  const h = harness(t);
+  const challenge = enterTeaching(h);
+  const { state: s } = h;
+  solveTeaching(h);
+  await settle(h);
+  const record = s.teachingRecords[0];
+  s.leavePage();
+  s.teachingRecords = [];
+  s.store.settings = { defaultOrder: 5, speed: 1, sound: true, haptics: true, beginnerGuides: true };
+  await s.loadData();
+  assert.equal(s.loaded, true);
+  assert.equal(s.storageWarning, '');
+  assert.equal(s.order, 5);
+  assert.equal(s.page, 'home');
+  assert.equal(s.challengeIndex, -1);
+  assert.equal(s.teachingRecords[0], record);
+  assert.notEqual(s.teachingRecords, s.store.teachingRecords);
+  assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_solved'));
+  assert.equal(s.records.length, 0);
+});
+
+test('teaching pauses in background and resumes without background time or duplicate turn commits', async t => {
+  const h = harness(t);
+  enterTeaching(h);
+  const { state: s, calls, clock } = h;
+  const before = snapshot(s.model);
+  s.startTimers();
+  clock.advance(8000);
+  clock.fire(s.clockTimer);
+  assert.equal(s.elapsed, 0);
+  s.requestMove(s.model.getSolution()[0]);
+  const active = s.activeMove;
+  clock.advance(100);
+  clock.fire(s.frameTimer);
+  clock.fire(s.clockTimer);
+  assert.equal(s.elapsed, 100);
+  touch(h, TouchType.Down);
+  s.foreground = false;
+  s.onForegroundChanged();
+  assert.equal(s.touching, false);
+  assert.equal(clock.timers.size, 0);
+  assert.equal(s.timeBase, 100);
+  clock.advance(60_000);
+  s.frame();
+  s.finishSolve();
+  s.requestMove(s.faceMove('D'));
+  s.undo();
+  s.showHint();
+  s.retryChallenge();
+  assert.equal(s.activeMove, active);
+  assert.equal(snapshot(s.model), before);
+  assert.equal(s.elapsed, 100);
+  assert.equal(s.moves, 0);
+  assert.equal(calls.teachingRecords.length, 0);
+  s.foreground = true;
+  s.onForegroundChanged();
+  assert.equal(clock.timers.size, 2);
+  completeMove(h, 219);
+  assert.equal(snapshot(s.model), before);
+  assert.equal(calls.teachingRecords.length, 0);
+  completeMove(h, 1);
+  assert.equal(s.model.isSolved(), true);
+  assert.equal(s.phase, 'solved');
+  assert.equal(s.moves, 1);
+  assert.equal(s.elapsed, 320, 'resume restarts the partial animation but excludes background time');
+  assert.equal(calls.feedback.length, 1);
+  assert.equal(calls.teachingRecords.length, 1);
+  assert.equal(calls.teachingRecords[0].durationMs, 320);
+  await settle(h);
+  s.finishSolve();
+  clock.advance(1000);
+  clock.fire(s.clockTimer);
+  s.frame();
+  assert.equal(s.elapsed, 320);
+  assert.equal(calls.teachingRecords.length, 1);
+  assert.equal(calls.records.length, 0);
+});
+
+test('passed teaching board supports view inspection without layer moves or beginner turn guidance', async t => {
+  const h = harness(t, { canvasReady: true });
+  enterTeaching(h);
+  const { state: s, calls } = h;
+  s.canvasMounted();
+  solveTeaching(h);
+  await settle(h);
+  const before = snapshot(s.model);
+  const corners = calls.drawBeginnerGuides.length;
+  const feedback = calls.feedback.length;
+  s.draw();
+  touch(h, TouchType.Down);
+  assert.equal(s.orbiting, true, 'a passed cube hit begins view inspection, not a layer gesture');
+  touch(h, TouchType.Move, 140, 120);
+  touch(h, TouchType.Up, 160, 130);
+  assert.ok(Math.abs(s.yaw - (0.62 - 60 * 0.009)) < 1e-12);
+  assert.ok(Math.abs(s.pitch - (-0.42 - 30 * 0.009)) < 1e-12);
+  assert.equal(snapshot(s.model), before);
+  assert.equal(s.phase, 'solved');
+  assert.equal(s.moves, 1);
+  assert.equal(s.busy, false);
+  assert.equal(calls.feedback.length, feedback);
+  assert.equal(calls.drawBeginnerGuides.length, corners, 'never suggest turning layers after passing');
+  assert.equal(calls.teachingRecords.length, 1);
+});

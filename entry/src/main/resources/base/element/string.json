@@ -321,6 +321,242 @@
       "value": "历史提示"
     },
     {
+      "name": "teaching",
+      "value": "进阶教学"
+    },
+    {
+      "name": "teaching_entry_title",
+      "value": "进阶教学"
+    },
+    {
+      "name": "teaching_kicker",
+      "value": "专项练习"
+    },
+    {
+      "name": "teaching_title",
+      "value": "循序练习，掌握还原"
+    },
+    {
+      "name": "teaching_description",
+      "value": "从指定局面出发，自由选择路线，完成六面复原。"
+    },
+    {
+      "name": "teaching_progress",
+      "value": "已完成 %1$d/%2$d"
+    },
+    {
+      "name": "teaching_rules",
+      "value": "六个面都需各自同色，任何还原路线均可。参考步数按每次 90° 转动计，不代表最少步数，也不限步数或用时。教学进度独立保存，不计入普通计时成绩。"
+    },
+    {
+      "name": "teaching_level",
+      "value": "第 %1$d 关"
+    },
+    {
+      "name": "teaching_level_details",
+      "value": "%1$d × %1$d · 参考 %2$d 步（每步 90°）"
+    },
+    {
+      "name": "teaching_difficulty_1",
+      "value": "入门"
+    },
+    {
+      "name": "teaching_difficulty_2",
+      "value": "进阶"
+    },
+    {
+      "name": "teaching_difficulty_3",
+      "value": "挑战"
+    },
+    {
+      "name": "teaching_status_new",
+      "value": "待挑战"
+    },
+    {
+      "name": "teaching_status_guided",
+      "value": "提示通关"
+    },
+    {
+      "name": "teaching_status_solved",
+      "value": "独立通关"
+    },
+    {
+      "name": "teaching_best",
+      "value": "最佳：%1$d 步 · %2$s"
+    },
+    {
+      "name": "teaching_goal",
+      "value": "目标：六个面各自同色。"
+    },
+    {
+      "name": "teaching_start_hint",
+      "value": "第一次滑动转层开始计时，可自由选择还原路线。"
+    },
+    {
+      "name": "teaching_retry",
+      "value": "重试"
+    },
+    {
+      "name": "teaching_retry_title",
+      "value": "重试本关？"
+    },
+    {
+      "name": "teaching_retry_message",
+      "value": "回到本关相同的初始局面，重新计时计步，不会自动还原。已保存的教学进度不受影响。"
+    },
+    {
+      "name": "teaching_back",
+      "value": "关卡"
+    },
+    {
+      "name": "teaching_leave_title",
+      "value": "返回教学关卡？"
+    },
+    {
+      "name": "teaching_leave_message",
+      "value": "本次未完成的局面不会保存，已保存的教学进度不受影响。"
+    },
+    {
+      "name": "teaching_next",
+      "value": "下一关"
+    },
+    {
+      "name": "teaching_all_complete",
+      "value": "此关已完成，返回继续挑战其他局面。"
+    },
+    {
+      "name": "teaching_passed",
+      "value": "独立通关！"
+    },
+    {
+      "name": "teaching_passed_guided",
+      "value": "提示通关！"
+    },
+    {
+      "name": "teaching_saving",
+      "value": "正在保存教学进度…"
+    },
+    {
+      "name": "teaching_saved",
+      "value": "教学进度已保存。"
+    },
+    {
+      "name": "teaching_save_failed",
+      "value": "本关已完成，但教学进度未能保存。"
+    },
+    {
+      "name": "teaching_previous_save_failed",
+      "value": "上次教学进度保存失败。"
+    },
+    {
+      "name": "teaching_hint_note",
+      "value": "历史提示按操作历史回溯，并非最优解。请求提示即视为使用辅助，完成后标记为提示通关。"
+    },
+    {
+      "name": "teaching_completed_note",
+      "value": "仅记录教学进度，不计入普通计时成绩。"
+    },
+    {
+      "name": "teaching_history_hint",
+      "value": "还原参考：%1$s。跟随小手沿轨迹滑动，松手转层；看不到小手时请转动视角。本次已使用提示，完成后将标记为提示通关。"
+    },
+    {
+      "name": "teaching_first_turn_title",
+      "value": "一转归位"
+    },
+    {
+      "name": "teaching_first_turn_description",
+      "value": "观察二阶右层转动后的颜色变化，练习把角块送回原位。"
+    },
+    {
+      "name": "teaching_first_turn_tip",
+      "value": "对照相邻面的颜色条带，判断哪一层需要回转；别只检查眼前一面。"
+    },
+    {
+      "name": "teaching_corner_pair_title",
+      "value": "两面接力"
+    },
+    {
+      "name": "teaching_corner_pair_description",
+      "value": "二阶的右层和顶层相继错位，练习追踪转层之间的影响。"
+    },
+    {
+      "name": "teaching_corner_pair_tip",
+      "value": "记住一个角块的三种颜色，观察它在相邻两层之间如何移动，再决定下一转。"
+    },
+    {
+      "name": "teaching_corner_loop_title",
+      "value": "角块回环"
+    },
+    {
+      "name": "teaching_corner_loop_description",
+      "value": "二阶角块在右层与顶层的来回转动后发生错位，练习同时观察位置和朝向。"
+    },
+    {
+      "name": "teaching_corner_loop_tip",
+      "value": "先辨认角块的颜色组合，再观察朝向；暂时拆开的色块也能在后续转动中接回。"
+    },
+    {
+      "name": "teaching_last_layer_title",
+      "value": "顶层归位"
+    },
+    {
+      "name": "teaching_last_layer_description",
+      "value": "三阶底两层已归位，顶层整体错开。练习对齐侧面的顶排颜色。"
+    },
+    {
+      "name": "teaching_last_layer_tip",
+      "value": "顶面同色还不够；绕看四个侧面，确认顶排颜色都与下方一致。"
+    },
+    {
+      "name": "teaching_right_slot_title",
+      "value": "角槽复位"
+    },
+    {
+      "name": "teaching_right_slot_description",
+      "value": "三阶右侧槽位及顶层尚未归位，练习兼顾角块与相邻棱块。"
+    },
+    {
+      "name": "teaching_right_slot_tip",
+      "value": "找到目标角块的三种颜色，先判断位置，再观察相邻棱块；移动一层后重新检查。"
+    },
+    {
+      "name": "teaching_cross_return_title",
+      "value": "十字还原"
+    },
+    {
+      "name": "teaching_cross_return_description",
+      "value": "三阶底两层已还原，两块相邻顶棱的顶色朝上，呈 L 形。练习辨认棱块朝向。"
+    },
+    {
+      "name": "teaching_cross_return_tip",
+      "value": "先看顶棱是否朝上，再检查侧面是否对齐；形成十字后仍需确认六面同色。"
+    },
+    {
+      "name": "teaching_corner_orient_title",
+      "value": "顶角定向"
+    },
+    {
+      "name": "teaching_corner_orient_description",
+      "value": "三阶底两层已还原，顶棱均已定向，只有一个顶角顶色朝上。练习同时辨认顶层角棱的位置与朝向。"
+    },
+    {
+      "name": "teaching_corner_orient_tip",
+      "value": "角块朝向正确不等于位置正确；顶层棱块也可能错位，转动视角检查侧面配色。"
+    },
+    {
+      "name": "teaching_edge_cycle_title",
+      "value": "顶棱轮换"
+    },
+    {
+      "name": "teaching_edge_cycle_description",
+      "value": "三阶顶角均已归位，三块顶棱循环错位。练习识别棱块应去的位置。"
+    },
+    {
+      "name": "teaching_edge_cycle_tip",
+      "value": "对照侧面颜色找出三块顶棱的去向，留意循环关系，并确认已归位的顶角最终保持正确。"
+    },
+    {
       "name": "personal_best",
       "value": "PERSONAL BEST"
     },

@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
 import { resourceManager } from './resource-helper.mjs';
+import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
 
 const sourceUrl = new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url);
 const source = readFileSync(sourceUrl, 'utf8');
@@ -17,7 +18,8 @@ function member(name) {
 }
 const names = ['touch', 'invalidateGesture', 'layerGestureCurrent', 'setTouchOrigin',
   'moveOrbit', 'judgeScrollGesture', 'animate', 'resetSession', 'onForegroundChanged',
-  'undo', 'aboutToDisappear', 'guideTarget', 'resetGuide', 'tr', 'setHint'];
+  'undo', 'aboutToDisappear', 'guideTarget', 'resetGuide', 'tr', 'setHint', 'toast',
+  'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge', 'leavePage', 'goHome'];
 const fields = source.match(/^struct Index \{\r?\n([\s\S]*?)(?=^  aboutToAppear\()/m);
 assert.ok(fields, 'production field defaults must be extractable');
 const declarations = fields[1].replace(/@\w+(?:\([^\r\n)]*\))?\s*/g, '');
@@ -26,19 +28,23 @@ const TouchType = Object.freeze({ Down: 0, Up: 1, Move: 2, Cancel: 3 });
 const GestureJudgeResult = Object.freeze({ CONTINUE: 0, REJECT: 1 });
 const GestureControl = Object.freeze({ GestureType: { PAN_GESTURE: 2, TAP_GESTURE: 0 } });
 const TouchHarness = runInNewContext(executable, {
-  TouchType, GestureJudgeResult, GestureControl, CubeModel,
+  TouchType, GestureJudgeResult, GestureControl, CubeModel, TeachingChallenge, createTeachingChallenges,
   CubeRenderer: class {}, CubeStore: class {}, CubeFeedback: class {},
-  CanvasRenderingContext2D: class {}, RenderingContextSettings: class {}
+  CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
+  Scroller: class { scrollTo() {} }
 }, { filename: sourceUrl.pathname });
 
 function point(id, x, y) {
   return { id, x, y, windowX: x + 400, windowY: y + 600, screenX: x + 800, screenY: y + 1000 };
 }
 function harness({ hit = true, busy = false, page = 'game', pickedMove = new CubeMove('x', 1, 1) } = {}) {
-  const calls = { hitTest: [], pickMove: [], requestMove: [], draw: [], timers: [], release: [] };
+  const calls = { hitTest: [], pickMove: [], requestMove: [], draw: [], timers: [], release: [], dialogs: [] };
   const state = Object.assign(new TouchHarness(), {
     page, busy, moves: 7,
-    getUIContext: () => ({ getHostContext: () => ({ resourceManager: resourceManager() }) }),
+    getUIContext: () => ({
+      getHostContext: () => ({ resourceManager: resourceManager() }),
+      showAlertDialog: dialog => calls.dialogs.push(dialog)
+    }),
     renderer: {
       hitTest(...args) { calls.hitTest.push(args); return hit; },
       pickMove(...args) { calls.pickMove.push(args); return pickedMove; }
@@ -460,4 +466,149 @@ test('both Canvas-hosting Scrolls install the pre-acceptance Pan judge', () => {
   for (const name of ['homePage', 'gamePage']) {
     assert.match(member(name), /\.onGestureRecognizerJudgeBegin\(\(_event: BaseGestureEvent, current: GestureRecognizer\) =>\s*this\.judgeScrollGesture\(current\)\)/);
   }
+});
+
+function startTeaching(h, index = 0) {
+  h.state.leavePage();
+  h.state.loaded = true;
+  h.state.openTeaching();
+  h.state.startChallenge(index);
+  assert.equal(h.state.challengeIndex, index);
+  assert.equal(h.state.phase, 'ready');
+}
+
+function passTouchFixture(h) {
+  // Game tests cover real animation commits; here only the touch dispatch boundary
+  // is isolated. Still use the real solved board rather than a stubbed isSolved().
+  for (const move of h.state.model.getSolution()) h.state.model.applyMove(move);
+  assert.equal(h.state.model.isSolved(), true);
+  h.state.phase = 'solved';
+}
+
+test('opening teaching cancels the home preview orbit and requires a new Down', () => {
+  const h = harness({ page: 'home' });
+  h.state.loaded = true;
+  start(h);
+  assert.equal(h.state.orbiting, true);
+  h.state.openTeaching();
+  assert.equal(h.state.page, 'teaching');
+  h.send(TouchType.Move, [point(42, 180, 150)]);
+  up(h);
+  assertReleased(h);
+  assertNoMove(h);
+  assertView(h);
+});
+
+for (const [name, change] of [
+  ['another challenge', h => h.state.startChallenge(1)],
+  ['retry', h => h.state.retryChallenge()],
+  ['catalogue back', h => h.state.goHome()],
+  ['direct home departure', h => h.state.leavePage()],
+  ['background and resume', h => {
+    h.state.foreground = false;
+    h.state.onForegroundChanged();
+    h.state.foreground = true;
+    h.state.onForegroundChanged();
+  }]
+]) {
+  test(`teaching ${name} invalidates a pending layer and stale Move/Up cannot turn the new board`, () => {
+    const h = harness();
+    startTeaching(h);
+    start(h);
+    assert.equal(h.state.touching, true);
+    change(h);
+    const after = JSON.stringify(h.state.model.cubies);
+    h.send(TouchType.Move, [point(42, 180, 150)]);
+    up(h);
+    assertReleased(h);
+    assertNoMove(h);
+    assert.equal(JSON.stringify(h.state.model.cubies), after);
+    assertView(h);
+    if (h.state.page === 'game') {
+      start(h);
+      up(h);
+      assert.equal(h.calls.requestMove.length, 1, 'a fresh gesture remains usable');
+    }
+  });
+}
+
+for (const destination of ['retry', 'leave']) {
+  test(`confirmed teaching ${destination} cancels a layer held while its dialog is open`, () => {
+    const h = harness();
+    startTeaching(h, 1);
+    h.state.model.applyMove(new CubeMove('z', 1, 1));
+    h.state.phase = 'playing';
+    if (destination === 'retry') h.state.retryChallenge();
+    else h.state.goHome();
+    assert.equal(h.calls.dialogs.length, 1);
+    start(h);
+    assert.equal(h.state.touching, true);
+    h.calls.dialogs[0].secondaryButton.action();
+    up(h);
+    assertReleased(h);
+    assertNoMove(h);
+    assert.equal(h.state.page, destination === 'retry' ? 'game' : 'teaching');
+  });
+}
+
+for (const inclusive of [true, false]) {
+  test(`passed teaching cube hit orbits with ${inclusive ? 'inclusive' : 'empty'} Up and never resolves a layer`, () => {
+    const h = harness();
+    startTeaching(h);
+    passTouchFixture(h);
+    const before = JSON.stringify(h.state.model.cubies);
+    const count = h.state.model.moveCount;
+    start(h);
+    assert.equal(h.state.orbiting, true);
+    assert.equal(h.state.blockedTouch, false);
+    h.send(TouchType.Move, [point(42, 130, 120)]);
+    const end = point(42, 160, 140);
+    h.send(TouchType.Up, inclusive ? [end] : [], [end]);
+    assertNoMove(h);
+    assertReleased(h);
+    assertView(h, 0.62 - 60 * 0.009, -0.42 - 40 * 0.009);
+    assert.equal(JSON.stringify(h.state.model.cubies), before);
+    assert.equal(h.state.model.moveCount, count);
+    assert.equal(h.state.phase, 'solved');
+  });
+}
+
+test('next challenge cancels inspection of a passed board before accepting a fresh layer gesture', () => {
+  const h = harness();
+  startTeaching(h);
+  passTouchFixture(h);
+  start(h);
+  assert.equal(h.state.orbiting, true);
+  h.state.nextChallenge();
+  assert.equal(h.state.challengeIndex, 1);
+  assert.equal(h.state.phase, 'ready');
+  up(h);
+  assertReleased(h);
+  assertNoMove(h);
+  assertView(h);
+  start(h);
+  assert.equal(h.state.orbiting, false);
+  up(h);
+  assert.equal(h.calls.requestMove.length, 1);
+});
+
+test('teaching hint hand is suppressed during multi-finger touch and cancelled cleanly', () => {
+  const h = harness();
+  startTeaching(h, 2);
+  h.state.hintMove = h.state.model.getSolution()[0];
+  h.state.assisted = true;
+  const draws = h.calls.draw.length;
+  const a = start(h);
+  assert.equal(h.calls.draw.length, draws + 1);
+  const b = point(11, 200, 160);
+  h.send(TouchType.Down, [a, b], [b]);
+  assert.equal(h.calls.draw.length, draws + 1);
+  h.send(TouchType.Up, [a, b], [b]);
+  assert.equal(h.state.touching, true);
+  h.send(TouchType.Cancel);
+  up(h);
+  assertReleased(h);
+  assertNoMove(h);
+  assert.equal(h.state.guideAt, -1);
+  assert.equal(h.state.assisted, true);
 });

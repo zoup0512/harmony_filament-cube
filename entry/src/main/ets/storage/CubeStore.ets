@@ -1,10 +1,13 @@
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
+import { TeachingChallenge, createTeachingChallenges } from '../model/CubeTeaching';
 
 const PREFERENCES_NAME: string = 'cube_store';
 const SETTINGS_KEY: string = 'settings';
 const RECORDS_KEY: string = 'records';
+const TEACHING_RECORDS_KEY: string = 'teaching_records';
 const MAX_RECORDS: number = 200;
+const TEACHING_CHALLENGES: TeachingChallenge[] = createTeachingChallenges();
 
 export class CubeSettings {
   defaultOrder: number = 3;
@@ -24,6 +27,23 @@ export class SolveRecord {
     this.order = order;
     this.durationMs = durationMs;
     this.moves = moves;
+    this.date = date;
+  }
+}
+
+export class TeachingRecord {
+  challengeId: string;
+  durationMs: number;
+  moves: number;
+  assisted: boolean;
+  date: number;
+
+  constructor(challengeId: string, durationMs: number, moves: number, assisted: boolean,
+    date: number = Date.now()) {
+    this.challengeId = challengeId;
+    this.durationMs = durationMs;
+    this.moves = moves;
+    this.assisted = assisted;
     this.date = date;
   }
 }
@@ -52,6 +72,62 @@ function isValidRecord(record: SolveRecord): boolean {
     record.durationMs >= 0 &&
     typeof record.moves === 'number' && Number.isSafeInteger(record.moves) && record.moves >= 0 &&
     typeof record.date === 'number' && Number.isSafeInteger(record.date) && record.date >= 0;
+}
+
+function isKnownChallenge(id: string): boolean {
+  if (typeof id !== 'string') {
+    return false;
+  }
+  for (const challenge of TEACHING_CHALLENGES) {
+    if (challenge.id === id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isValidTeachingRecord(record: TeachingRecord): boolean {
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+    return false;
+  }
+  return isKnownChallenge(record.challengeId) &&
+    typeof record.durationMs === 'number' && Number.isFinite(record.durationMs) &&
+    record.durationMs >= 0 &&
+    typeof record.moves === 'number' && Number.isSafeInteger(record.moves) && record.moves >= 0 &&
+    typeof record.assisted === 'boolean' &&
+    typeof record.date === 'number' && Number.isSafeInteger(record.date) && record.date >= 0;
+}
+
+function copyTeachingRecord(record: TeachingRecord): TeachingRecord {
+  return new TeachingRecord(record.challengeId, record.durationMs, record.moves, record.assisted, record.date);
+}
+
+function isBetterTeachingRecord(candidate: TeachingRecord, current: TeachingRecord): boolean {
+  if (candidate.assisted !== current.assisted) {
+    return !candidate.assisted;
+  }
+  if (candidate.moves !== current.moves) {
+    return candidate.moves < current.moves;
+  }
+  return candidate.durationMs < current.durationMs;
+}
+
+/** One best result per catalogue entry, in catalogue order. Exact ties keep the first result. */
+function bestTeachingRecords(records: TeachingRecord[]): TeachingRecord[] {
+  const retained: TeachingRecord[] = [];
+  for (const challenge of TEACHING_CHALLENGES) {
+    let best: TeachingRecord | undefined = undefined;
+    for (const record of records) {
+      if (record.challengeId === challenge.id &&
+        (best === undefined || isBetterTeachingRecord(record, best))) {
+        best = record;
+      }
+    }
+    if (best !== undefined) {
+      retained.push(copyTeachingRecord(best));
+    }
+  }
+  return retained;
 }
 
 function copySettings(settings: CubeSettings): CubeSettings {
@@ -102,10 +178,31 @@ function decodeRecords(value: string): SolveRecord[] {
   }
 }
 
+function decodeTeachingRecords(value: string): TeachingRecord[] {
+  try {
+    const parsed = JSON.parse(value) as TeachingRecord[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const records: TeachingRecord[] = [];
+    for (const record of parsed) {
+      // Keep valid achievements when a stale/unknown ID or damaged entry is present.
+      if (isValidTeachingRecord(record)) {
+        records.push(copyTeachingRecord(record));
+      }
+    }
+    return bestTeachingRecords(records);
+  } catch {
+    return [];
+  }
+}
+
 export class CubeStore {
   public settings: CubeSettings = new CubeSettings();
   // Newest first. The UI displays records.slice(0, 20); storage retains up to 200.
   public records: SolveRecord[] = [];
+  // Independent of solve history; clearing normal records never resets teaching progress.
+  public teachingRecords: TeachingRecord[] = [];
 
   private storage: preferences.Preferences | undefined = undefined;
   private pending: Promise<void> = Promise.resolve();
@@ -115,13 +212,17 @@ export class CubeStore {
       const storage = await preferences.getPreferences(context, { name: PREFERENCES_NAME });
       const settingsValue = await storage.get(SETTINGS_KEY, '');
       const recordsValue = await storage.get(RECORDS_KEY, '');
+      const teachingValue = await storage.get(TEACHING_RECORDS_KEY, '');
       const settings: CubeSettings = typeof settingsValue === 'string' ?
         decodeSettings(settingsValue) : new CubeSettings();
       const records: SolveRecord[] = typeof recordsValue === 'string' ?
         decodeRecords(recordsValue) : [];
+      const teachingRecords: TeachingRecord[] = typeof teachingValue === 'string' ?
+        decodeTeachingRecords(teachingValue) : [];
       this.storage = storage;
       this.settings = settings;
       this.records = records;
+      this.teachingRecords = teachingRecords;
     });
   }
 
@@ -152,6 +253,22 @@ export class CubeStore {
       await storage.put(RECORDS_KEY, JSON.stringify(retained));
       await storage.flush();
       this.records = retained;
+    });
+  }
+
+  public async addTeachingRecord(record: TeachingRecord): Promise<void> {
+    if (!isValidTeachingRecord(record)) {
+      throw new Error('Invalid teaching record. Check challengeId, durationMs, moves, assisted and date.');
+    }
+    const snapshot: TeachingRecord = copyTeachingRecord(record);
+    return this.enqueue(async (): Promise<void> => {
+      const storage = this.requireStorage();
+      const records: TeachingRecord[] = this.teachingRecords.slice();
+      records.push(snapshot);
+      const retained: TeachingRecord[] = bestTeachingRecords(records);
+      await storage.put(TEACHING_RECORDS_KEY, JSON.stringify(retained));
+      await storage.flush();
+      this.teachingRecords = retained;
     });
   }
 
