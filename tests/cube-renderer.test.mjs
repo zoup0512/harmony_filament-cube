@@ -106,10 +106,8 @@ function geometry(renderer) {
   ])).sort();
 }
 
-// Independent Android gesture oracle: axis cross face normal, camera rotation,
-// then screen XY projection. The former actual-rotation derivative was too strong:
-// Android intentionally rejects near-collinear axes and follows face rows/columns,
-// rather than position-dependent perspective velocities.
+// Independent gesture oracle: finite-difference the perspective projection of
+// axis cross face normal at the envelope hit, not the actual rotation velocity.
 function camera(point, yaw, pitch) {
   const x = point[0] * Math.cos(yaw) - point[2] * Math.sin(yaw);
   const z = point[0] * Math.sin(yaw) + point[2] * Math.cos(yaw);
@@ -124,11 +122,14 @@ function gesture(face, order, axis, yaw, pitch) {
   const velocity = axis === 'x' ? [0, -n.z, n.y] :
     axis === 'y' ? [n.z, 0, -n.x] : [-n.y, n.x, 0];
   const p = camera(point, yaw, pitch);
-  const v = camera(velocity, yaw, pitch);
   const denominator = 6 - p[2];
   const focal = Math.min(width, height) * 1.48;
-  const tx = v[0];
-  const ty = -v[1];
+  const x = width / 2 + focal * p[0] / denominator;
+  const y = height / 2 - focal * p[1] / denominator;
+  const hit = envelopeHit(x, y, order, yaw, pitch);
+  const direction = projectedTangent(hit.point, velocity, yaw, pitch);
+  const tx = direction.x;
+  const ty = direction.y;
   const length = Math.hypot(tx, ty);
   return {
     x: width / 2 + focal * p[0] / denominator,
@@ -139,13 +140,13 @@ function gesture(face, order, axis, yaw, pitch) {
   };
 }
 
-function envelopeHit(x, y, order, yaw, pitch) {
+function envelopeHit(x, y, order, yaw, pitch, w = width, h = height, zoom = 1) {
   // Independent slab ray/AABB oracle, inverse rotation by matrix transpose.
   const basis = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(p => camera(p, yaw, pitch));
   const inverse = p => basis.map(b => b.reduce((sum, value, i) => sum + value * p[i], 0));
   const origin = inverse([0, 0, 6]);
-  const ray = inverse([(x - width / 2) / (Math.min(width, height) * 1.48),
-    -(y - height / 2) / (Math.min(width, height) * 1.48), -1]);
+  const focal = Math.min(w, h) * 1.48 * zoom;
+  const ray = inverse([(x - w / 2) / focal, -(y - h / 2) / focal, -1]);
   let near = -Infinity;
   let far = Infinity;
   let normal;
@@ -165,7 +166,7 @@ function envelopeHit(x, y, order, yaw, pitch) {
   }
   if (near > far || near <= 0) return null;
   const point = origin.map((o, a) => o + near * ray[a]);
-  return { normal, layer: point.map(p => Math.max(0, Math.min(order - 1, Math.floor((p + 1) * order / 2)))) };
+  return { point, normal, layer: point.map(p => Math.max(0, Math.min(order - 1, Math.floor((p + 1) * order / 2)))) };
 }
 
 for (const order of orders) {
@@ -303,6 +304,17 @@ function screen(point, yaw, pitch) {
   const scale = Math.min(width, height) * 1.48 / (6 - p[2]);
   return { x: width / 2 + p[0] * scale, y: height / 2 - p[1] * scale };
 }
+function projectedTangent(point, velocity, yaw, pitch) {
+  const epsilon = 1e-4;
+  const before = screen(point.map((p, i) => p - epsilon * velocity[i]), yaw, pitch);
+  const after = screen(point.map((p, i) => p + epsilon * velocity[i]), yaw, pitch);
+  return { x: (after.x - before.x) / (2 * epsilon), y: (after.y - before.y) / (2 * epsilon) };
+}
+function rowTangent(hit, axis, yaw, pitch) {
+  const [nx, ny, nz] = hit.normal;
+  const velocity = axis === 'x' ? [0, -nz, ny] : axis === 'y' ? [nz, 0, -nx] : [-ny, nx, 0];
+  return projectedTangent(hit.point, velocity, yaw, pitch);
+}
 function contains(polygon, x, y) {
   const crosses = polygon.map((a, i) => {
     const b = polygon[(i + 1) % polygon.length];
@@ -329,7 +341,8 @@ for (const order of [2, 3, 4, 5]) {
         assert.ok(guide instanceof CubeSwipeGuide);
         const { startX, startY, endX, endY } = guide;
         assert.ok([startX, startY, endX, endY].every(Number.isFinite));
-        assert.ok(Math.abs(Math.hypot(endX - startX, endY - startY) - 55) < 1e-7);
+        const travel = Math.hypot(endX - startX, endY - startY);
+        assert.ok(travel >= 26 - 1e-7 && travel <= 55 + 1e-7);
         assert.ok(Math.min(startX, endX) >= 26 && Math.max(startX, endX) <= width - 26);
         assert.ok(Math.min(startY, endY) >= 26 && Math.max(startY, endY) <= height - 26);
         const hit = envelopeHit(startX, startY, order, yaw, pitch);
@@ -339,8 +352,17 @@ for (const order of [2, 3, 4, 5]) {
           axes.every((key, i) => face.normal[key] === hit.normal[i] && face[key] === hit.layer[i]) &&
           contains(face.sticker, startX, startY));
         assert.ok(sticker, 'guide starts on an exposed sticker, not a seam or hidden face');
-        const expected = gesture(sticker, order, axis, yaw, pitch);
-        assert.ok(((endX - startX) * expected.dx + (endY - startY) * expected.dy) * turns > 0);
+        const expected = rowTangent(hit, axis, yaw, pitch);
+        const alignment = ((endX - startX) * expected.x + (endY - startY) * expected.y) /
+          (travel * Math.hypot(expected.x, expected.y));
+        assert.ok(Math.abs(alignment - turns) < 1e-7, 'guide follows the perspective row/column');
+        for (let sample = 1; sample <= 10; sample++) {
+          const end = envelopeHit(startX + (endX - startX) * sample / 10,
+            startY + (endY - startY) * sample / 10, order, yaw, pitch);
+          assert.ok(end, 'entire trail stays on the cube');
+          assert.deepEqual(end.normal, hit.normal, 'trail cannot cross onto another face');
+          assert.equal(end.layer[axes.indexOf(axis)], layer, 'trail stays within the target layer');
+        }
         const picked = renderer.pickMove(startX, startY, endX, endY, model, yaw, pitch);
         assert.ok(picked, `guide must pick ${moveKey(target)} at ${yaw}/${pitch}`);
         assert.equal(moveKey(picked), moveKey(target));
@@ -413,7 +435,53 @@ for (const order of [2, 3, 4, 5]) {
   });
 }
 
-test('Android score and ambiguity gates reject diagonals, including two high-scoring axes', () => {
+test('oblique guides adapt travel and remain on the same surface/layer after pixel rounding and zoom', t => {
+  let checked = 0;
+  let shortened = 0;
+  let unavailable = 0;
+  for (const order of [2, 3, 5, 7]) {
+    const model = seededModel(order);
+    const renderer = new CubeRenderer();
+    for (const [w, h] of [[210, 250], [320, 284]]) {
+      for (const zoom of [1, 1.25]) {
+        for (const [yaw, pitch] of [[0, -1.3], [3.14, -0.42], [-0.8, 0.73], [1.57, 1.45]]) {
+          renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch, null, 0, zoom);
+          for (const axis of axes) for (let layer = 0; layer < order; layer++) for (const turns of [-1, 1]) {
+            const move = new CubeMove(axis, layer, turns);
+            const guide = renderer.getSwipeGuide(move);
+            if (!guide) { unavailable++; continue; }
+            const travel = Math.hypot(guide.endX - guide.startX, guide.endY - guide.startY);
+            assert.ok(travel >= 26 - 1e-7 && travel <= 55 + 1e-7);
+            if (travel < 54.9) shortened++;
+            for (const scale of [1, 1.5, 2.75]) {
+              const [sx, sy, ex, ey] = [guide.startX, guide.startY, guide.endX, guide.endY]
+                .map(value => Math.round(value * scale) / scale);
+              assert.ok(Math.hypot(ex - sx, ey - sy) >= 24, 'rounded guide reaches page submission threshold');
+              const start = envelopeHit(sx, sy, order, yaw, pitch, w, h, zoom);
+              assert.ok(start);
+              for (let i = 0; i <= 10; i++) {
+                const hit = envelopeHit(sx + (ex - sx) * i / 10, sy + (ey - sy) * i / 10,
+                  order, yaw, pitch, w, h, zoom);
+                assert.ok(hit, 'rounded trail cannot leave cube');
+                assert.deepEqual(hit.normal, start.normal);
+                assert.equal(hit.layer[axes.indexOf(axis)], layer);
+              }
+              assert.equal(moveKey(renderer.pickMove(sx, sy, ex, ey, model, yaw, pitch)), moveKey(move));
+              checked++;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 1000 && shortened > 0 && unavailable > 0);
+  const renderer = new CubeRenderer();
+  renderer.draw(new CheckingCanvas(), 48, 48, new CubeModel(3), 3.14, -0.42);
+  assert.equal(renderer.getSwipeGuide(new CubeMove('x', 2, 1)), null, 'hide paths too small for a reliable swipe');
+  t.diagnostic(`${checked} pixel-rounded guides, ${shortened} shortened paths, ${unavailable} safe view fallbacks`);
+});
+
+test('perspective score and ambiguity gates reject diagonals, including two high-scoring axes', () => {
   const renderer = new CubeRenderer();
   const model = new CubeModel(3);
   const context = new CheckingCanvas();
@@ -429,8 +497,8 @@ test('Android score and ambiguity gates reject diagonals, including two high-sco
       const dx = Math.cos(angle * Math.PI / 180) * 55;
       const dy = Math.sin(angle * Math.PI / 180) * 55;
       const scores = axes.filter(axis => !face.normal[axis]).map(axis => {
-        const tangent = gesture(face, 3, axis, yaw, pitch);
-        const dot = (dx * tangent.dx + dy * tangent.dy) / (55 * 30);
+        const tangent = rowTangent(hit, axis, yaw, pitch);
+        const dot = (dx * tangent.x + dy * tangent.y) / (55 * Math.hypot(tangent.x, tangent.y));
         return { axis, score: Math.abs(dot), turns: dot >= 0 ? 1 : -1 };
       }).sort((a, b) => b.score - a.score);
       const [best, second] = scores;
@@ -749,8 +817,9 @@ test('guide cache lifetime, invalidation, logical units, overlay and Canvas rest
     renderer.draw(context, w, h, model, 0, 0);
     const guide = renderer.getSwipeGuide(move);
     assert.ok(guide);
-    assert.ok(Math.abs(Math.hypot(guide.endX - guide.startX, guide.endY - guide.startY) - 55) < 1e-7,
-      '55 logical units, independent of viewport size / device pixel ratio');
+    const travel = Math.hypot(guide.endX - guide.startX, guide.endY - guide.startY);
+    assert.ok(travel >= 26 - 1e-7 && travel <= 55 + 1e-7,
+      'safe logical-unit travel, independent of device pixel ratio');
     const before = geometry(renderer);
     overlay.globalAlpha = 0.3;
     overlay.strokeStyle = '#123456';

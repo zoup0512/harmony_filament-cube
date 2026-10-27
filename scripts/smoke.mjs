@@ -389,15 +389,15 @@ async function loadGeometry() {
   geometryApi = { CubeModel, CubeMove, CubeRenderer };
   return geometryApi;
 }
-function drawGeometry(order, width, height) {
+function drawGeometry(order, width, height, yaw = 0.62, pitch = -0.42) {
   const { CubeModel, CubeRenderer } = geometryApi;
   const model = new CubeModel(order);
   const renderer = new CubeRenderer();
   // Only drawing calls are mocked: projection, hit testing and gesture picking are real.
   const ctx = Object.fromEntries(['save', 'restore', 'clearRect', 'beginPath', 'moveTo', 'lineTo',
     'closePath', 'fill', 'stroke'].map(name => [name, () => {}]));
-  renderer.draw(ctx, width, height, model, 0.62, -0.42);
-  return { renderer, model, width, height };
+  renderer.draw(ctx, width, height, model, yaw, pitch);
+  return { renderer, model, width, height, yaw, pitch };
 }
 function faceMove(face, order) {
   const spec = { U: ['y', order - 1, -1], D: ['y', 0, 1], L: ['x', 0, 1],
@@ -408,7 +408,7 @@ function faceMove(face, order) {
   return move;
 }
 function guidePixels(geometry, face, canvasBounds, scale) {
-  const { renderer, model, width, height } = geometry;
+  const { renderer, model, width, height, yaw, pitch } = geometry;
   const move = faceMove(face, model.order);
   const guide = renderer.getSwipeGuide(move);
   if (!guide || !['startX', 'startY', 'endX', 'endY'].every(key => Number.isFinite(guide[key]))) {
@@ -423,7 +423,19 @@ function guidePixels(geometry, face, canvasBounds, scale) {
   if (![0, 2].every(i => logical[i] > 0 && logical[i] < width && logical[i + 1] > 0 && logical[i + 1] < height)) {
     throw new Error(`ASSERTION FAILED: ${face} guide leaves Canvas: ${JSON.stringify({ guide, logical, width, height })}`);
   }
-  const picked = renderer.pickMove(...logical, model, 0.62, -0.42);
+  if (Math.hypot(logical[2] - logical[0], logical[3] - logical[1]) < 24) {
+    throw new Error(`ASSERTION FAILED: pixel-quantized ${face} guide is below the 24vp touch threshold`);
+  }
+  const start = renderer.boxHit(logical[0], logical[1]);
+  for (let sample = 0; sample <= 10; sample++) {
+    const hit = renderer.boxHit(logical[0] + (logical[2] - logical[0]) * sample / 10,
+      logical[1] + (logical[3] - logical[1]) * sample / 10);
+    if (!start || !hit || ['x', 'y', 'z'].some(axis => hit.normal[axis] !== start.normal[axis]) ||
+      hit[move.axis] !== move.layer) {
+      throw new Error(`ASSERTION FAILED: pixel-quantized ${face} guide leaves its surface/layer at ${yaw}/${pitch}`);
+    }
+  }
+  const picked = renderer.pickMove(...logical, model, yaw, pitch);
   if (!picked || picked.axis !== move.axis || picked.layer !== move.layer || picked.turns !== move.turns) {
     throw new Error(`ASSERTION FAILED: pixel-quantized ${face} guide picks wrong move: ${JSON.stringify({ move, picked, guide, logical })}`);
   }
@@ -480,11 +492,17 @@ async function checkGesturesOffline() {
   // pickMove guard as device injection. No generated copy of renderer geometry.
   for (const order of [2, 3, 4, 5]) {
     for (const [width, height] of [[300, 260], [360, 320], [480, 380]]) {
-      const geometry = drawGeometry(order, width, height);
-      for (const scale of [1, 1.5, 2, 2.75, 3.5]) {
-        for (const face of ['U', 'R', 'D', "L'", 'F', "U'", "R'"]) {
-          guidePixels(geometry, face, { left: 41, top: 203 }, scale);
-          checks++;
+      for (const [yaw, pitch] of [[0.62, -0.42], [0, -1.3], [3.14, -0.42], [-0.8, 0.73], [1.57, 1.45]]) {
+        const geometry = drawGeometry(order, width, height, yaw, pitch);
+        for (const scale of [1, 1.5, 2, 2.75, 3.5]) {
+          for (const face of ['U', 'R', 'D', "L'", 'F', "U'", "R'"]) {
+            if (!geometry.renderer.getSwipeGuide(faceMove(face, order))) {
+              if (yaw === 0.62 && pitch === -0.42) throw new Error(`Default view cannot guide ${face}`);
+              continue;
+            }
+            guidePixels(geometry, face, { left: 41, top: 203 }, scale);
+            checks++;
+          }
         }
       }
     }

@@ -261,7 +261,7 @@ export class CubeRenderer {
       }
       // Android row/column convention: axis cross face normal, not axis cross
       // hit position. Positive alignment is a positive right-handed quarter turn.
-      let tangent: CubePoint2 = this.swipeTangent(hit.normal, axis);
+      let tangent: CubePoint2 = this.swipeTangent(hit.point, hit.normal, axis);
       let tx: number = tangent.x;
       let ty: number = tangent.y;
       let tangentLength: number = Math.sqrt(tx * tx + ty * ty);
@@ -305,15 +305,10 @@ export class CubeRenderer {
     let best: CubeSwipeGuide | null = null;
     let bestQuality: number = -1;
     // Center first, then inset samples: never suggest a seam or a hidden sticker.
-    let fractions: number[] = [0.5, 0.3, 0.7];
+    let fractions: number[] = [0.5, 0.3, 0.7, 0.15, 0.85];
     for (let i: number = 0; i < this.faces.length; i++) {
       let face: CubeVisibleFace = this.faces[i];
       if (face.sticker.length !== 4 || this.layerCoordinate(face.cubie, move.axis) !== move.layer) {
-        continue;
-      }
-      let tangent: CubePoint2 = this.swipeTangent(face.normal, move.axis);
-      let length: number = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
-      if (length < 0.0001) {
         continue;
       }
       let area: number = 0;
@@ -338,8 +333,35 @@ export class CubeRenderer {
             hit.normal.z !== face.normal.z) {
             continue;
           }
-          let guide: CubeSwipeGuide = new CubeSwipeGuide(x, y,
-            x + 55 * move.turns * tangent.x / length, y + 55 * move.turns * tangent.y / length);
+          if (!this.guideEndpointFits(x, y, hit, move)) {
+            continue;
+          }
+          let tangent: CubePoint2 = this.swipeTangent(hit.point, hit.normal, move.axis);
+          let length: number = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+          if (length < 0.0001) {
+            continue;
+          }
+          let ux: number = move.turns * tangent.x / length;
+          let uy: number = move.turns * tangent.y / length;
+          // Leave room for pixel rounding above the page's 24vp swipe threshold.
+          let travel: number = 26;
+          if (!this.guideEndpointFits(x + ux * (travel + 2), y + uy * (travel + 2), hit, move)) {
+            continue;
+          }
+          let upper: number = 55;
+          if (this.guideEndpointFits(x + ux * 57, y + uy * 57, hit, move)) {
+            travel = 55;
+          } else {
+            for (let step: number = 0; step < 8; step++) {
+              let middle: number = (travel + upper) * 0.5;
+              if (this.guideEndpointFits(x + ux * (middle + 2), y + uy * (middle + 2), hit, move)) {
+                travel = middle;
+              } else {
+                upper = middle;
+              }
+            }
+          }
+          let guide: CubeSwipeGuide = new CubeSwipeGuide(x, y, x + travel * ux, y + travel * uy);
           // The hand extends behind its fingertip; keep its whole path on Canvas.
           let canvasMargin: number = Math.min(x, y, this.width - x, this.height - y,
             guide.endX, guide.endY, this.width - guide.endX, this.height - guide.endY);
@@ -362,8 +384,8 @@ export class CubeRenderer {
                 Math.abs((b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)) / edgeLength);
             }
           }
-          // Favor large visible stickers and starts well away from their edges.
-          let quality: number = Math.sqrt(area) + 2 * clearance;
+          // Prefer readable travel as well as a large sticker and an inset start.
+          let quality: number = travel + Math.sqrt(area) + 2 * clearance;
           if (quality > bestQuality) {
             bestQuality = quality;
             best = guide;
@@ -417,7 +439,7 @@ export class CubeRenderer {
       // Alternate row and column examples, pointing inward rather than off the cube.
       for (let j: number = 0; j < tangentAxes.length; j++) {
         const axis: string = tangentAxes[(corner + j) % tangentAxes.length];
-        const tangent: CubePoint2 = this.swipeTangent(face.normal, axis);
+        const tangent: CubePoint2 = this.swipeTangent(hit.point, hit.normal, axis);
         const length: number = Math.sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
         if (length < 0.0001) { continue; }
         const sign: number = tangent.x * (center.x - x) + tangent.y * (center.y - y) >= 0 ? 1 : -1;
@@ -568,7 +590,25 @@ export class CubeRenderer {
     return true;
   }
 
-  private swipeTangent(normal: CubeVector3, axis: string): CubePoint2 {
+  private guideEndpointFits(x: number, y: number, start: CubeSurfaceHit, move: CubeMove): boolean {
+    if (Math.min(x, y, this.width - x, this.height - y) < 26) {
+      return false;
+    }
+    // A 1vp neighborhood absorbs coordinate quantization near face/layer seams.
+    for (let dx: number = -1; dx <= 1; dx++) {
+      for (let dy: number = -1; dy <= 1; dy++) {
+        let end: CubeSurfaceHit | null = this.boxHit(x + dx, y + dy);
+        if (end === null || end.normal.x !== start.normal.x || end.normal.y !== start.normal.y ||
+          end.normal.z !== start.normal.z ||
+          (move.axis === 'x' ? end.x : (move.axis === 'y' ? end.y : end.z)) !== move.layer) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private swipeTangent(point: CubeVector3, normal: CubeVector3, axis: string): CubePoint2 {
     let tangent: CubeVector3;
     if (axis === 'x') {
       tangent = new CubeVector3(0, -normal.z, normal.y);
@@ -578,7 +618,11 @@ export class CubeRenderer {
       tangent = new CubeVector3(-normal.y, normal.x, 0);
     }
     let camera: CubeVector3 = this.toCamera(tangent);
-    return new CubePoint2(camera.x, -camera.y);
+    let position: CubeVector3 = this.toCamera(point);
+    let depth: number = this.cameraDistance - position.z;
+    // Perspective derivative, omitting the common positive focal/depth scale.
+    return new CubePoint2(camera.x + position.x * camera.z / depth,
+      -camera.y - position.y * camera.z / depth);
   }
 
   private layerCoordinate(cubie: Cubelet, axis: string): number {
