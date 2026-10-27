@@ -92,16 +92,21 @@ test('game gesture toggle shares the help row with flexible text, not a canvas o
   const game = member('gamePage');
   const help = game.slice(game.indexOf('Text(this.guideTarget()'), game.indexOf('if (this.hint.length > 0)'));
   assert.match(help, /\.layoutWeight\(1\)/, 'help text must wrap in remaining narrow-screen width');
-  assert.match(help, /Button\(this\.tr\('guides_button', this\.beginnerGuides \? this\.tr\('on'\) : this\.tr\('off'\)\)/);
-  assert.match(help, /\.width\(70\)\.height\(44\)/, 'localized guide control retains a 44vp touch target');
+  assert.match(help, /Text\(this\.tr\('guides_label'\)\)/);
+  assert.match(help, /Toggle\(\{ type: ToggleType\.Switch, isOn: this\.beginnerGuides \}\)\.width\(44\)\.height\(28\)/);
+  assert.match(help, /\.selectedColor\(CubeTheme\.green\)\.switchStyle\(\{ unselectedColor: CubeTheme\.line \}\)/);
+  assert.match(help, /\.responseRegion\(\{ x: -10, y: -8, width: 64, height: 44 \}\)/,
+    'compact switch retains a 44vp touch target without overlapping adjacent controls');
+  assert.match(help, /\.width\(84\)\.constraintSize\(\{ minHeight: 52 \}\)/);
+  assert.doesNotMatch(help, /Button\(this\.tr\('guides_/);
   assert.match(help, /\.accessibilityText\(this\.tr\('guides_accessibility', this\.beginnerGuides \? this\.tr\('on'\) : this\.tr\('off'\)\)\)/);
-  for (const key of ['guides_button', 'guides_accessibility', 'on', 'off', 'reset_view']) wired(help, key);
-  assert.equal(base.guides_button, '手势 %1$s');
-  assert.equal(english.guides_button, 'Guides %1$s');
+  for (const key of ['guides_label', 'guides_accessibility', 'on', 'off', 'reset_view']) wired(help, key);
+  assert.equal(base.guides_label, '手势提示');
+  assert.equal(english.guides_label, 'Gesture guides');
   assert.equal(base.guides_accessibility, '新手手势提示，%1$s');
   assert.equal(english.guides_accessibility, 'Beginner gesture guides, %1$s');
   assert.deepEqual([base.on, base.off, english.on, english.off], ['开', '关', 'on', 'off']);
-  assert.match(help, /\.onClick\(\(\) => this\.setBeginnerGuides\(!this\.beginnerGuides\)\)/);
+  assert.match(help, /\.onChange\(\(value: boolean\) => this\.setBeginnerGuides\(value\)\)/);
   assert.equal((game.match(/this\.cubeStage\(\)/g) ?? []).length, 1);
   assert.doesNotMatch(member('cubeStage'), /beginnerGuides|Button\(|Toggle\(|\.onTouch\(/);
   assert.doesNotMatch(member('cubeCanvas'), /beginnerGuides|Button\(|Toggle\(/);

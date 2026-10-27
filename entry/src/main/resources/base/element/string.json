@@ -285,8 +285,8 @@
       "value": "跟随角块上的手势滑动，松手转层\n中间方块也可滑动；空白或双指转视角"
     },
     {
-      "name": "guides_button",
-      "value": "手势 %1$s"
+      "name": "guides_label",
+      "value": "手势提示"
     },
     {
       "name": "guides_accessibility",

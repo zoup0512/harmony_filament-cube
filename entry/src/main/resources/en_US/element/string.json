@@ -285,8 +285,8 @@
       "value": "Swipe as shown on the corners; release to turn.\nMiddle pieces work too. Background or two fingers: rotate."
     },
     {
-      "name": "guides_button",
-      "value": "Guides %1$s"
+      "name": "guides_label",
+      "value": "Gesture guides"
     },
     {
       "name": "guides_accessibility",

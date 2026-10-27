@@ -115,7 +115,7 @@ test('resource mocks and observation patterns honor reordered and repeated posit
   assert.equal(api.resourcePattern('%2$s / %1$d / %1$d').pattern.test('R / 4 / 5'), false);
   assert.equal(api.observedText('4 × 5 Cube'), '4 × 5 Cube', 'repeated order must agree');
   assert.equal(api.observedText('4 by 4, selected'), '4 阶，已选择');
-  assert.equal(api.observedText('Guides on'), '手势 开');
+  assert.equal(api.observedText('Gesture guides'), '手势提示');
   assert.equal(api.observedText('Beginner gesture guides, off'), '新手手势提示，关');
   const en = resourceStrings('en');
   assert.equal(api.observedText(formatResource(en.history_hint, ['X layer 2 +90°'])),

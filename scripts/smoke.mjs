@@ -27,7 +27,7 @@ const LOCALE_STRINGS = RESOURCE_LOCALE === 'en' ? ENGLISH_STRINGS : BASE_STRINGS
 // --check-gestures runs ONLY the real renderer/model checks, without HDC or artifacts.
 const OUT = process.env.SMOKE_OUT ? resolve(process.env.SMOKE_OUT) : join(ROOT, 'verification', 'gestures');
 const CASE_NAMES = ['order-2', 'order-4', 'order-5', 'order-3', 'tutorial', 'free-move-undo',
-  'surface-swipe', 'scramble-timer-hint-back', 'statistics', 'settings-persistence'];
+  'surface-swipe', 'scramble-timer-hint-back', 'gesture-guides-switch', 'statistics', 'settings-persistence'];
 const SELECTED_CASES = process.env.SMOKE_CASES === undefined ? null :
   new Set(process.env.SMOKE_CASES.split(',').map(value => value.trim()).filter(Boolean));
 if (SELECTED_CASES && (SELECTED_CASES.size === 0 || [...SELECTED_CASES].some(name => !CASE_NAMES.includes(name)))) {
@@ -44,7 +44,7 @@ const MIN_COMMAND_MS = 2000;
 const summary = {
   startedAt: new Date().toISOString(), target: TARGET, bundle: BUNDLE, locale: SMOKE_LOCALE,
   outputDirectory: OUT, status: 'running', results: [], artifacts: [], diagnostics: [], actions: [],
-  policy: 'Never clear records or app data. Only default order is changed, then restored to 3. Sound, haptics and speed are inspected, not changed.'
+  policy: 'Never clear records or app data. Default order is restored to 3. Gesture guides may be toggled and are restored to their original value. Sound, haptics and speed are inspected, not changed.'
 };
 let latest;
 let currentCase = 'startup';
@@ -702,6 +702,56 @@ async function main() {
     await tapDialog('返回首页？', '返回首页');
     await waitFor('confirmed return home', isHome);
     check(true, 'leave dialog confirmation returns home');
+  });
+
+  await runCase('gesture-guides-switch', async () => {
+    const gameToggle = state => state.nodes.find(n => /Toggle|Switch/.test(n.type) && usable(n, state) && n.enabled);
+    const settingsToggle = state => {
+      const label = find(state, BASE_STRINGS.beginner_guides, 'Text');
+      return descendants(label?.parent?.parent).find(n => /Toggle|Switch/.test(n.type) && usable(n, state) && n.enabled);
+    };
+    const checked = toggle => {
+      check(toggle?.a.checked === true || toggle?.a.checked === false ||
+        toggle?.a.checked === 'true' || toggle?.a.checked === 'false', 'guide switch exposes a native checked state');
+      return toggle.a.checked === true || toggle.a.checked === 'true';
+    };
+    const hasState = (toggle, value) => Boolean(toggle) && String(toggle.a.checked) === String(value);
+    const initial = await game(3);
+    const original = checked(gameToggle(initial));
+    try {
+      check(has(initial, BASE_STRINGS.guides_label), 'game labels the switch as gesture guides');
+      await capture('guides-game-initial');
+      tapNode(gameToggle(initial), 'toggle game gesture guides');
+      let state = await waitFor('game guide switch changed', s => hasState(gameToggle(s), !original));
+      check(moves(state) === 0 && timer(state) === '00:00.00', 'guide switch does not change moves or time');
+      await capture('guides-game-toggled');
+      await swipeFace('U');
+      state = await waitFor('surface swipe works after guide toggle', s => moves(s) === 1 && idleControls(s));
+      await tap(/撤销/);
+      await waitFor('guide toggle does not prevent undo', s => moves(s) === 0 && idleControls(s));
+      await settings();
+      state = await reveal('settings guide switch', s => hasState(settingsToggle(s), !original));
+      check(hasState(settingsToggle(state), !original), 'settings reflects the game guide switch');
+      await capture('guides-settings-linked');
+      await restart();
+      await settings();
+      state = await reveal('persisted guide switch', s => hasState(settingsToggle(s), !original));
+      check(hasState(settingsToggle(state), !original), 'guide switch survives application restart');
+      tapNode(settingsToggle(state), 'restore guide setting from settings');
+      await waitFor('settings guide switch restored', s => hasState(settingsToggle(s), original));
+      state = await game(3);
+      check(hasState(gameToggle(state), original), 'game reflects the settings guide switch');
+      await capture('guides-game-restored');
+    } finally {
+      await restart();
+      await settings();
+      const state = await reveal('guide switch cleanup', s => Boolean(settingsToggle(s)));
+      if (checked(settingsToggle(state)) !== original) {
+        tapNode(settingsToggle(state), 'restore original guide preference');
+        await waitFor('original guide preference restored', s => hasState(settingsToggle(s), original));
+      }
+      await home();
+    }
   });
 
   await runCase('statistics', async () => {
