@@ -985,16 +985,9 @@ struct Index {
         Button(this.tr('start_game'), { type: ButtonType.Normal }).width('100%').height(56)
           .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Bold)
           .borderRadius(18).enabled(this.loaded).onClick(() => this.startGame())
-        Button({ type: ButtonType.Normal }) {
-          Stack({ alignContent: Alignment.Center }) {
-            Text(this.tr('teaching_entry_title')).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-            Row() {
-              Text('→').fontSize(20).fontColor(CubeTheme.ink).accessibilityLevel('no')
-            }.width('100%').justifyContent(FlexAlign.End).padding({ right: 18 })
-          }.width('100%').height(56)
-        }.width('100%').height(56).padding(0).borderRadius(18)
-          .backgroundColor(CubeTheme.mint).enabled(this.loaded)
-          .accessibilityText(this.tr('teaching_entry_title')).onClick(() => this.openTeaching())
+        Button(this.tr('teaching_entry_title'), { type: ButtonType.Normal }).width('100%').height(56)
+          .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Bold)
+          .borderRadius(18).enabled(this.loaded).onClick(() => this.openTeaching())
         Row({ space: 10 }) {
           Button({ type: ButtonType.Normal }) {
             Row({ space: 10 }) {

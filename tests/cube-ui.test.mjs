@@ -161,12 +161,12 @@ test('game retains view reset, canvas, time and move count', () => {
 
 test('advanced teaching naming is consistent across entry, header, descriptions and level titles', () => {
   assert.equal(base.teaching, '进阶教学');
-  assert.equal(base.teaching_entry_title, base.teaching);
+  assert.equal(base.teaching_entry_title, `${base.teaching}  →`);
   assert.equal(base.teaching_title, '循序练习，掌握还原');
   assert.equal(base.teaching_description, '从指定局面出发，自由选择路线，完成六面复原。');
   assert.equal(base.teaching_cross_return_title, '十字还原');
   assert.equal(english.teaching, 'Advanced lessons');
-  assert.equal(english.teaching_entry_title, english.teaching);
+  assert.equal(english.teaching_entry_title, `${english.teaching}  →`);
   assert.equal(english.teaching_title, 'Master the solve, step by step');
   assert.equal(english.teaching_description,
     'Start from a set position, choose your own route, and solve all six faces.');
@@ -175,21 +175,37 @@ test('advanced teaching naming is consistent across entry, header, descriptions 
   }
 });
 
-test('teaching home entry is a single-line button matching the start action geometry', () => {
+test('teaching home entry uses the same native label layout and style as the start action except background', () => {
   const home = member('homePage');
-  wired(home, 'teaching_entry_title');
-  const entryEnd = home.indexOf('\n', home.indexOf('this.openTeaching()'));
-  const entry = home.slice(home.lastIndexOf('Button({', home.indexOf("Text('→')")), entryEnd);
-  assert.match(entry, /Text\(this\.tr\('teaching_entry_title'\)\)\.fontSize\(17\)\.fontWeight\(FontWeight\.Bold\)\.fontColor\(CubeTheme\.ink\)/);
-  assert.match(entry, /Text\('→'\)/);
-  assert.doesNotMatch(entry, /▦|↗|teaching_entry_description|Column\(/);
-  assert.match(entry, /\.height\(56\)\.padding\(0\)\.borderRadius\(18\)\s*\.backgroundColor\(CubeTheme\.mint\)/);
-  assert.match(entry, /\.enabled\(this\.loaded\)\s*\.accessibilityText\(this\.tr\('teaching_entry_title'\)\)\.onClick\(\(\) => this\.openTeaching\(\)\)/);
+  function action(key) {
+    const start = home.indexOf(`Button(this.tr('${key}'),`);
+    assert.ok(start >= 0, `${key} must use a native text Button`);
+    const end = home.indexOf('\n', home.indexOf('.onClick(', start));
+    const block = home.slice(start, end);
+    wired(block, key);
+    assert.doesNotMatch(block, /Stack\(|Row\(|Column\(|Text\(|\.padding\(|\.align|\.position\(/);
+    return block;
+  }
+  const start = action('start_game');
+  const teaching = action('teaching_entry_title');
+  assert.match(start, /\.backgroundColor\(CubeTheme\.accent\)/);
+  assert.match(teaching, /\.backgroundColor\(CubeTheme\.mint\)/);
+  assert.match(teaching, /\.width\('100%'\)\.height\(56\)/);
+  assert.match(teaching, /\.fontColor\(CubeTheme\.ink\)\.fontSize\(17\)\.fontWeight\(FontWeight\.Bold\)/);
+  assert.match(teaching, /\.borderRadius\(18\)\.enabled\(this\.loaded\)\.onClick\(\(\) => this\.openTeaching\(\)\)/);
+  const normalize = block => block.replace(/'(?:start_game|teaching_entry_title)'/, "'action'")
+    .replace(/CubeTheme\.(?:accent|mint)/, 'CubeTheme.background')
+    .replace(/this\.(?:startGame|openTeaching)\(\)/, 'this.action()').trim();
+  assert.equal(normalize(teaching), normalize(start), 'both actions must retain identical label and style structure');
+  for (const strings of [base, english, resourceStrings('en-US')]) {
+    assert.ok(strings.start_game.endsWith('  →'));
+    assert.equal(strings.teaching_entry_title, `${strings.teaching}  →`);
+  }
 });
 
 test('teaching home entry opens a resource-backed catalogue with stable IDs and persisted progress', () => {
   const home = member('homePage');
-  assert.match(home, /\.enabled\(this\.loaded\)\s*\.accessibilityText\(this\.tr\('teaching_entry_title'\)\)\.onClick\(\(\) => this\.openTeaching\(\)\)/);
+  assert.match(home, /Button\(this\.tr\('teaching_entry_title'\), \{ type: ButtonType\.Normal \}\)[\s\S]*?\.enabled\(this\.loaded\)\.onClick\(\(\) => this\.openTeaching\(\)\)/);
   assert.match(member('build'), /this\.page === 'teaching'\) \{\s*this\.teachingPage\(\)/);
   const catalogue = member('teachingPage');
   assert.match(catalogue, /this\.header\('teaching'\)/);
