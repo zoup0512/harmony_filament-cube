@@ -1152,21 +1152,31 @@ struct Index {
           this.teachingGoal()
         }
         Row() {
-          Column({ space: 5 }) {
+          Column({ space: 3 }) {
             Text(this.tr('elapsed_time')).fontSize(11).fontColor('#C3D2CA')
-            Text(this.formatTime(this.elapsed)).fontFamily('monospace').fontSize(32)
+            Text(this.formatTime(this.elapsed)).fontFamily('monospace').fontSize(26)
               .fontWeight(FontWeight.Medium).fontColor('#FFFFFF').maxLines(1)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Column({ space: 5 }) {
+          Column({ space: 3 }) {
             Text(this.tr('move_count')).fontSize(11).fontColor('#C3D2CA')
-            Text(`${this.moves}`).fontSize(32).fontWeight(FontWeight.Medium).fontColor(CubeTheme.accent)
+            Text(`${this.moves}`).fontSize(26).fontWeight(FontWeight.Medium).fontColor(CubeTheme.accent)
           }.alignItems(HorizontalAlign.End).constraintSize({ minWidth: 48 })
-        }.width('100%').padding({ left: 22, right: 22, top: 16, bottom: 16 })
-          .backgroundColor(CubeTheme.ink).borderRadius(24)
+        }.width('100%').padding({ left: 18, right: 18, top: 10, bottom: 10 })
+          .backgroundColor(CubeTheme.ink).borderRadius(20)
         Stack() {
           this.cubeStage()
-        }.width('100%').height(Math.max(240, Math.min(480, this.viewportHeight -
-          (this.hint.length > 0 ? 450 : 370) - (this.challengeIndex >= 0 ? 120 : 0))))
+        }.width('100%').height(Math.max(240, Math.min(480,
+          this.viewportHeight - 370 - (this.challengeIndex >= 0 ? 120 : 0))))
+        Row({ space: 12 }) {
+          Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
+            .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(14).fontWeight(FontWeight.Bold)
+            .enabled(!this.busy && this.moves > 0 && this.phase !== 'tutorial' && this.phase !== 'solved')
+            .onClick(() => this.undo())
+          Button(this.tr('history_help'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
+            .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).fontWeight(FontWeight.Bold)
+            .enabled(!this.busy && this.phase !== 'tutorial' && this.phase !== 'solved')
+            .onClick(() => this.showHint())
+        }.width('100%')
         Row({ space: 6 }) {
           Text(this.guideTarget() !== null ? this.tr('guided_help') :
             this.tr('gesture_help'))
@@ -1201,16 +1211,6 @@ struct Index {
                 .enabled(!this.busy).onClick(() => this.confirmReset())
             }.width('100%').margin({ top: 4 })
           }
-          Row({ space: 12 }) {
-            Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
-              .backgroundColor(Color.Transparent).fontColor(CubeTheme.secondary)
-              .enabled(!this.busy && this.moves > 0 && this.phase !== 'tutorial' && this.phase !== 'solved')
-              .onClick(() => this.undo())
-            Button(this.tr('history_help'), { type: ButtonType.Normal }).layoutWeight(1).height(44).fontSize(12)
-              .backgroundColor(Color.Transparent).fontColor(CubeTheme.secondary)
-              .enabled(!this.busy && this.phase !== 'tutorial' && this.phase !== 'solved')
-              .onClick(() => this.showHint())
-          }.width('100%')
         }.width('100%').padding(14).backgroundColor(CubeTheme.surface).borderRadius(24)
       }.width('100%').constraintSize({ maxWidth: 600 }).padding({ left: 18, right: 18, top: 10, bottom: 16 })
     }.width('100%').height('100%').scrollBar(BarState.Off)

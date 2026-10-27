@@ -349,7 +349,7 @@ function assertTouchOnly(state) {
   check(obsolete.length === 0, 'no twelve face buttons or obsolete face-control title/instructions', {
     obsolete: obsolete.map(n => ({ text: n.text, type: n.type, bounds: n.a.bounds }))
   });
-  check(['打乱', '教程', '复位', /撤销/, '历史提示', '正视角'].every(label => button(state, label)),
+  check(['打乱', '教程', '复位', /撤销/, BASE_STRINGS.history_help, '正视角'].every(label => button(state, label)),
     'retains scramble/tutorial/reset/undo/history/view controls');
 }
 function lesson(state) {
@@ -689,9 +689,9 @@ async function main() {
     await waitFor('challenge timer continues advancing', s => centiseconds(s) > firstTime && moves(s) === 1);
     check(true, 'R starts running timer and move count 1');
     await capture('challenge-first-R');
-    await tap('历史提示');
+    await tap(BASE_STRINGS.history_help);
     state = await waitFor('history reference and assisted practice', s =>
-      has(s, /历史回退参考/) && has(s, '辅助练习') && has(s, /不计入成绩/));
+      has(s, resourcePattern(BASE_STRINGS.history_hint).pattern) && has(s, '辅助练习') && has(s, /不计入成绩/));
     check(has(state, '辅助练习'), 'history hint changes phase to 辅助练习 and excludes score');
     await capture('history-hint-assisted');
     await tapBack();

@@ -107,6 +107,38 @@ test('game gesture toggle shares the help row with flexible text, not a canvas o
   assert.doesNotMatch(member('cubeCanvas'), /beginnerGuides|Button\(|Toggle\(/);
 });
 
+test('undo and solve hint sit directly below the cube with prominent touch targets', () => {
+  const game = member('gamePage');
+  const cube = game.indexOf('this.cubeStage()');
+  const undo = game.indexOf("Button(this.tr('undo'),");
+  const hint = game.indexOf("Button(this.tr('history_help'),");
+  const help = game.indexOf('Text(this.guideTarget()');
+  assert.ok(cube < undo && undo < hint && hint < help);
+  const cubeLayout = game.slice(cube, undo);
+  assert.doesNotMatch(cubeLayout, /Text\(|Button\(|Column\(/,
+    'no help text or secondary controls may separate the cube from its actions');
+  assert.doesNotMatch(cubeLayout, /this\.hint/,
+    'showing solve guidance must not resize the canvas or shift its action row');
+  for (const key of ['undo', 'history_help']) {
+    const block = buttonBlock(key);
+    assert.match(block, /\.layoutWeight\(1\)\.height\(48\)\.borderRadius\(14\)/);
+    assert.match(block, /\.fontSize\(14\)\.fontWeight\(FontWeight\.Bold\)/);
+    assert.doesNotMatch(block, /Color\.Transparent/);
+  }
+  assert.match(buttonBlock('undo'), /\.backgroundColor\(CubeTheme\.mint\)\.fontColor\(CubeTheme\.green\)/);
+  assert.match(buttonBlock('history_help'), /\.backgroundColor\(CubeTheme\.ink\)\.fontColor\('#FFFFFF'\)/);
+});
+
+test('game time and move summary stays compact without reducing label legibility', () => {
+  const game = member('gamePage');
+  const summary = game.slice(game.indexOf("Text(this.tr('elapsed_time'))"), game.indexOf('this.cubeStage()'));
+  assert.match(summary, /this\.formatTime\(this\.elapsed\)\)\.fontFamily\('monospace'\)\.fontSize\(26\)/);
+  assert.match(summary, /Text\(`\$\{this\.moves\}`\)\.fontSize\(26\)/);
+  assert.match(summary, /\.padding\(\{ left: 18, right: 18, top: 10, bottom: 10 \}\)/);
+  assert.match(summary, /\.backgroundColor\(CubeTheme\.ink\)\.borderRadius\(20\)/);
+  assert.equal((summary.match(/\.fontSize\(11\)/g) ?? []).length, 2);
+});
+
 test('settings gesture switch shares the handler and explains corner-only hints without solve answers', () => {
   const settings = member('settingsPage');
   const start = settings.indexOf("Text(this.tr('beginner_guides'))");
@@ -238,7 +270,7 @@ test('teaching game shows the real goal and substitutes retry/back controls for 
   assert.match(goal, /this\.tr\('teaching_level_details', this\.order, this\.challenges\[this\.challengeIndex\]\.referenceMoves\)/);
   assert.match(game, /if \(this\.challengeIndex >= 0\) \{\s*this\.teachingGoal\(\)/);
   assert.match(game, /if \(this\.challengeIndex >= 0\) \{\s*this\.teachingControls\(\)\s*\} else \{/);
-  const legacy = game.slice(game.indexOf('this.teachingControls()'), game.indexOf("Button(this.tr('undo')"));
+  const legacy = game.slice(game.indexOf('this.teachingControls()'), game.indexOf("}.width('100%').padding(14)"));
   for (const key of ['scramble', 'tutorial', 'reset']) wired(legacy, key);
   const controls = member('teachingControls');
   assert.doesNotMatch(controls, /doScramble|scramble\(\)|startLesson|doLesson|confirmReset|resetStepByStep/);
