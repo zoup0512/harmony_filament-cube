@@ -125,12 +125,16 @@ export class CubeRenderer {
   private animating: boolean = false;
   private cachedCubies: Cubelet[] = [];
   private cachedCoordinates: number[] = [];
+  private cachedGuideMove: CubeMove | null = null;
+  private cachedGuide: CubeSwipeGuide | null = null;
 
   draw(ctx: CanvasRenderingContext2D, width: number, height: number, model: CubeModel,
     yaw: number, pitch: number, move: CubeMove | null = null, progress: number = 0,
     zoom: number = 1): void {
     this.faces = [];
     this.lastModel = null;
+    this.cachedGuideMove = null;
+    this.cachedGuide = null;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
       return;
     }
@@ -302,6 +306,10 @@ export class CubeRenderer {
       move.layer < 0 || !Number.isInteger(move.layer) || Math.abs(move.turns) !== 1) {
       return null;
     }
+    if (this.cachedGuideMove !== null && this.cachedGuideMove.axis === move.axis &&
+      this.cachedGuideMove.layer === move.layer && this.cachedGuideMove.turns === move.turns) {
+      return this.cachedGuide;
+    }
     let best: CubeSwipeGuide | null = null;
     let bestQuality: number = -1;
     // Center first, then inset samples: never suggest a seam or a hidden sticker.
@@ -393,6 +401,8 @@ export class CubeRenderer {
         }
       }
     }
+    this.cachedGuideMove = new CubeMove(move.axis, move.layer, move.turns);
+    this.cachedGuide = best;
     return best;
   }
 

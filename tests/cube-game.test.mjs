@@ -13,8 +13,10 @@ import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.m
 // layout changes must fail extraction rather than silently use fallback logic.
 const pageUrl = new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url);
 const source = readFileSync(pageUrl, 'utf8');
+const baseCanvasSource = source.match(/private cubeCanvas\(\) \{[\s\S]*?^  \}/m)[0];
+const guidanceCanvasSource = source.match(/private guidanceCanvas\(\) \{[\s\S]*?^  \}/m)[0];
 const names = [
-  'startTimers', 'stopTimers', 'onForegroundChanged', 'draw', 'frame', 'animate',
+  'startTimers', 'stopTimers', 'onForegroundChanged', 'draw', 'drawGuidance', 'clearGuidance', 'frame', 'animate',
   'resetSession', 'confirmReset', 'resetStepByStep', 'phaseLabel', 'chooseOrder', 'startGame', 'leavePage', 'doScramble',
   'faceMove', 'moveLabel', 'sameMove', 'requestMove', 'undo', 'showHint',
   'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast',
@@ -22,7 +24,7 @@ const names = [
   'touch', 'layerGestureCurrent', 'setTouchOrigin', 'moveOrbit',
   'tr', 'setHint', 'onLanguageChanged', 'formatTime', 'bestTime', 'orderSolves',
   'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge',
-  'teachingStatus', 'teachingBest', 'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startLesson'
+  'teachingStatus', 'teachingBest', 'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startLesson', 'showTeachingGoal'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
@@ -32,13 +34,17 @@ const members = names.map(name => {
 });
 // Execute the plain callback bodies as well, so remount/resize/view tests use
 // exactly the handlers attached by the production ArkUI builders.
-for (const [name, parameters, pattern] of [
-  ['canvasMounted', '', /\.onReady\(\(\) => \{([^\r\n]*)\}\)/],
-  ['canvasResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m],
+for (const [name, parameters, pattern, callbackSource = source] of [
+  ['canvasMounted', '', /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, baseCanvasSource],
+  ['canvasDisappeared', '', /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, baseCanvasSource],
+  ['canvasResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m, baseCanvasSource],
+  ['guidanceMounted', '', /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
+  ['guidanceDisappeared', '', /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
+  ['guidanceResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m, guidanceCanvasSource],
   ['gameAppeared', '', /\.onAppear\(\(\) => (this\.gameScroller\.scrollTo\(\{ xOffset: 0, yOffset: 0 \}\))\)/],
   ['frontView', '', /\.onClick\(\(\) => \{ (this\.invalidateGesture\(\); this\.yaw = 0\.62;[^\r\n]*) \}\)/]
 ]) {
-  const match = source.match(pattern);
+  const match = callbackSource.match(pattern);
   assert.ok(match, `${name} callback must be extractable`);
   members.push(`${name}(${parameters}): void {${match[1]}}`);
 }
@@ -126,7 +132,10 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
       play(...args) { calls.feedback.push(args); }
       async prepare() {}
     },
-    CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
+    CanvasRenderingContext2D: class {
+      clears = [];
+      clearRect(...args) { this.clears.push(args); }
+    }, RenderingContextSettings: class {},
     Scroller: class { scrollTo(options) { calls.scroll.push({ ...options }); } },
     setInterval(callback, delay) {
       const id = nextTimer++;
@@ -147,6 +156,9 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   });
   state.startGame();
   state.canvasReady = canvasReady;
+  state.guidanceReady = canvasReady;
+  state.guidanceWidth = state.canvasWidth;
+  state.guidanceHeight = state.canvasHeight;
   const clock = {
     now: () => now,
     // Wall time and interval callbacks are deliberately separate. No real sleeps,
@@ -168,6 +180,105 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   });
   return { state, calls, clock, guide };
 }
+
+test('gesture instructions appear only on the first game entry in this app session', t => {
+  const { state: s } = harness(t);
+  assert.equal(s.hintKey, 'gesture_help');
+  assert.match(s.hint, /跟随角块上的手势滑动/);
+  assert.equal(s.gestureHelpSeen, true);
+  s.resetSession();
+  assert.equal(s.hint, '');
+  assert.equal(s.gestureHelpSeen, true);
+  s.leavePage();
+  s.startGame();
+  assert.equal(s.hint, '');
+  assert.equal(s.hintKey, '');
+});
+
+test('a first accepted free-practice move dismisses initial gesture instructions without starting a timer', t => {
+  const { state: s } = harness(t);
+  s.requestMove(s.faceMove('R'));
+  assert.equal(s.busy, true);
+  assert.equal(s.hint, '');
+  assert.equal(s.hintKey, '');
+  assert.equal(s.assisted, false);
+  assert.equal(s.phase, 'idle');
+  assert.equal(s.startedAt, 0);
+});
+
+test('blocked moves do not dismiss initial gesture instructions', t => {
+  const { state: s } = harness(t);
+  for (const blocked of ['busy', 'background', 'other-page']) {
+    s.busy = blocked === 'busy';
+    s.foreground = blocked !== 'background';
+    s.page = blocked === 'other-page' ? 'home' : 'game';
+    s.requestMove(s.faceMove('R'));
+    assert.equal(s.hintKey, 'gesture_help');
+    assert.equal(s.activeMove, null);
+  }
+});
+
+test('scramble, tutorial and teaching instructions replace initial help without repeating it', t => {
+  const { state: s } = harness(t);
+  s.doScramble();
+  assert.equal(s.hintKey, 'scrambling_hint');
+  s.resetSession();
+  s.doLesson();
+  assert.equal(s.hintKey, 'lesson_preparing');
+  s.resetSession();
+  s.loaded = true;
+  s.page = 'teaching';
+  s.startChallenge(0);
+  assert.equal(s.hintKey, 'teaching_start_hint');
+  s.leavePage();
+  s.startGame();
+  assert.equal(s.hint, '');
+});
+
+test('teaching goal details preserve the attempt and never count as solve assistance', t => {
+  const h = harness(t);
+  const { state: s, calls } = h;
+  s.loaded = true;
+  s.page = 'teaching';
+  s.startChallenge(0);
+  const position = snapshot(s.model);
+  const session = s.sessionId;
+  for (const phase of ['ready', 'playing', 'solved']) {
+    s.phase = phase;
+    s.showTeachingGoal();
+    const dialog = calls.dialogs.at(-1);
+    assert.ok(dialog.title.includes(s.tr(s.challenges[0].titleKey)));
+    for (const text of [s.tr('teaching_goal_summary'), s.tr(s.challenges[0].tipKey),
+      s.tr('teaching_start_hint'), s.tr('teaching_hint_note'),
+      s.tr('teaching_level_details', s.order, s.challenges[0].referenceMoves)]) {
+      assert.ok(dialog.message.includes(text));
+    }
+    assert.equal(dialog.primaryButton.value, s.tr('teaching_goal_close'));
+    dialog.primaryButton.action();
+    assert.equal(snapshot(s.model), position);
+    assert.equal(s.sessionId, session);
+    assert.equal(s.phase, phase);
+    assert.equal(s.assisted, false);
+    assert.equal(s.moves, 0);
+    assert.equal(s.hintMove, null);
+  }
+});
+
+test('teaching goal details ignore normal games, invalid levels and background requests', t => {
+  const { state: s, calls } = harness(t);
+  s.showTeachingGoal();
+  assert.equal(calls.dialogs.length, 0);
+  s.challengeIndex = 0;
+  s.page = 'home';
+  s.showTeachingGoal();
+  s.page = 'game';
+  s.foreground = false;
+  s.showTeachingGoal();
+  s.foreground = true;
+  s.challengeIndex = s.challenges.length;
+  s.showTeachingGoal();
+  assert.equal(calls.dialogs.length, 0);
+});
 
 function snapshot(model) { return JSON.stringify(model.cubies); }
 
@@ -673,12 +784,12 @@ test('beginner gesture guides default on; toggling redraws immediately and persi
   const { state: s, calls } = h;
   assert.equal(s.beginnerGuides, true);
   s.draw();
-  assert.deepEqual(calls.drawBeginnerGuides, [[s.context2d]]);
+  assert.deepEqual(calls.drawBeginnerGuides, [[s.guidanceContext]]);
   assert.equal(calls.getSwipeGuide.length, 0, 'directions must not request a solution guide');
   const before = snapshot(s.model);
   s.setBeginnerGuides(false);
   assert.equal(s.beginnerGuides, false);
-  assert.equal(calls.draw.length, 2, 'turning off clears gesture guides by repainting the cube');
+  assert.equal(calls.draw.length, 1, 'turning off clears only the transparent guidance layer');
   assert.equal(calls.drawBeginnerGuides.length, 1);
   assert.equal(calls.settings.at(-1).beginnerGuides, false);
   s.draw();
@@ -744,7 +855,7 @@ for (const kind of ['tutorial', 'history']) {
         s.beginnerGuides = enabled;
         s.draw();
         assert.equal(calls.getSwipeGuide.at(-1)[0], target);
-        if (guideVisible) assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+        if (guideVisible) assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
         else assert.equal(calls.drawGuide.length, 0);
         assert.equal(calls.drawBeginnerGuides.length, 0, 'never fall back to directions for a hidden target');
       }
@@ -769,19 +880,19 @@ for (const kind of ['tutorial', 'history']) {
     const draws = calls.draw.length;
     const corners = calls.drawBeginnerGuides.length;
     const phase = s.phase;
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
     const samples = [[16, 16 / 1800], [272, 0.16], [1044, 0.74], [378, 0.95],
       [90, 0], [900, 0.5], [900, 0]];
     for (const [ms, progress] of samples) {
       clock.advance(ms);
       clock.fire(s.frameTimer);
       clock.fire(s.clockTimer);
-      assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, progress, kind !== 'tutorial']);
+      assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, progress, kind !== 'tutorial']);
       assert.equal(calls.getSwipeGuide.at(-1)[0], target);
-      assert.equal(calls.draw.at(-1)[7], 0, 'guide progress must not animate a cube turn');
+      assert.equal(calls.draw.at(-1)[6], null, 'guide progress must not animate a cube turn');
       assert.equal(calls.draw.at(-1)[8], s.cubeZoom);
     }
-    assert.equal(calls.draw.length, draws + samples.length);
+    assert.equal(calls.draw.length, draws, 'hint frames never repaint the base cube');
     assert.equal(calls.drawBeginnerGuides.length, corners);
     assert.deepEqual([...clock.timers.values()].map(timer => timer.delay), [16, 83]);
     assert.equal(snapshot(s.model), before);
@@ -815,7 +926,7 @@ for (const kind of ['tutorial', 'history']) {
     assert.equal(calls.drawGuide.length, guides);
     s.foreground = true;
     s.onForegroundChanged();
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
     assert.equal(calls.getSwipeGuide.at(-1)[0], target);
     assert.deepEqual([...clock.timers.values()].map(timer => timer.delay), [16, 83]);
     clock.advance(450);
@@ -838,14 +949,14 @@ for (const kind of ['tutorial', 'history']) {
       const corners = calls.drawBeginnerGuides.length;
       touch(h, TouchType.Down);
       assert.equal(s.touching, true);
-      assert.equal(calls.draw.length, draws + 1, 'Down immediately repaints the cube to erase the hand');
+      assert.equal(calls.draw.length, draws, 'Down erases only the guidance layer');
       assert.equal(calls.drawGuide.length, guides);
       touch(h, TouchType.Move, 108, 100);
       for (let i = 0; i < 4; i++) {
         clock.advance(900);
         clock.fire(s.frameTimer);
       }
-      assert.equal(calls.draw.length, draws + 1, 'touch must not keep a target animation running');
+      assert.equal(calls.draw.length, draws, 'touch must not keep a target animation running');
       s.draw(); // External repaint must also suppress the hand, not just timer ticks.
       assert.equal(calls.drawGuide.length, guides);
       assert.equal(calls.getSwipeGuide.length, lookups);
@@ -853,7 +964,7 @@ for (const kind of ['tutorial', 'history']) {
       touch(h, end, 108, 100);
       assert.equal(s.touching, false);
       clock.fire(s.frameTimer);
-      assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+      assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
       clock.advance(450);
       clock.fire(s.frameTimer);
       assert.equal(calls.drawGuide.at(-1)[2], 0.25);
@@ -910,26 +1021,33 @@ for (const enabled of [true, false]) {
   });
 }
 
-test('requesting the same history hint restarts its demonstration; unrelated redraws keep progress', t => {
+test('requesting the same visible history hint is idempotent; unrelated redraws keep progress', t => {
   const h = harness(t, { canvasReady: true });
   const { state: s, calls, clock, guide } = h;
   const target = showTarget(h, 'history');
   clock.advance(900);
   s.frame();
   assert.equal(calls.drawGuide.at(-1)[2], 0.5);
-  s.showHint();
+  const draws = calls.draw.length;
+  const guidanceDraws = calls.drawGuide.length;
+  const at = s.guideAt;
+  for (let i = 0; i < 18; i++) s.showHint();
   assert.equal(s.sameMove(s.hintMove, target), true);
-  assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+  assert.equal(s.hintMove, target, 'same-valued new solution objects do not replace the active hint');
+  assert.equal(s.guideAt, at);
+  assert.equal(calls.draw.length, draws, 'repeated hints never repaint the base cube');
+  assert.equal(calls.drawGuide.length, guidanceDraws, 'visible repeated hints are entirely idempotent');
+  assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0.5, s.phase !== 'tutorial']);
   clock.advance(450);
   s.setBeginnerGuides(false);
-  assert.equal(calls.drawGuide.at(-1)[2], 0.25, 'corner settings do not restart a target');
+  assert.equal(calls.drawGuide.at(-1)[2], 0.75, 'corner settings do not restart a target');
   assert.equal(s.assisted, true);
 });
 
 for (const [name, change] of [
   ['front view', s => s.frontView()],
-  ['canvas width', s => s.canvasResized({ width: s.canvasWidth + 20, height: s.canvasHeight })],
-  ['canvas height', s => s.canvasResized({ width: s.canvasWidth, height: s.canvasHeight + 20 })],
+  ['canvas width', s => { const area = { width: s.canvasWidth + 20, height: s.canvasHeight }; s.canvasResized(area); s.guidanceResized(area); }],
+  ['canvas height', s => { const area = { width: s.canvasWidth, height: s.canvasHeight + 20 }; s.canvasResized(area); s.guidanceResized(area); }],
   ['canvas remount', s => s.canvasMounted()]
 ]) {
   test(`${name} callback restarts the current target without advancing the lesson`, t => {
@@ -940,7 +1058,7 @@ for (const [name, change] of [
     s.frame();
     assert.equal(calls.drawGuide.at(-1)[2], 0.5);
     change(s);
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
     assert.equal(calls.getSwipeGuide.at(-1)[0], target);
     assert.equal(s.lessonIndex, 0);
     clock.advance(450);
@@ -952,7 +1070,7 @@ for (const [name, change] of [
 
 for (const [name, recover] of [
   ['front view', h => h.state.frontView()],
-  ['canvas resize', h => h.state.canvasResized({ width: 360, height: 300 })],
+  ['canvas resize', h => { const area = { width: 360, height: 300 }; h.state.canvasResized(area); h.state.guidanceResized(area); }],
   ['canvas remount', h => h.state.canvasMounted()],
   ['new history hint', h => h.state.showHint()],
   ['model change', h => {
@@ -984,7 +1102,7 @@ for (const [name, recover] of [
     const guide = { startX: 100, startY: 120, endX: 150, endY: 140 };
     s.renderer.getSwipeGuide = (...args) => { calls.getSwipeGuide.push(args); return guide; };
     recover(h);
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
     clock.advance(450);
     clock.fire(s.frameTimer);
     assert.equal(calls.drawGuide.at(-1)[2], 0.25);
@@ -1005,7 +1123,7 @@ test('invisible tutorial target is reconsidered after the next committed step', 
   completeMove(h);
   assert.equal(s.lessonIndex, 1);
   assert.equal(calls.getSwipeGuide.at(-1)[0], s.lesson[1]);
-  assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+  assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
 });
 
 test('unready canvas with a target does not animate or resolve guidance', t => {
@@ -1058,10 +1176,10 @@ test('each committed lesson step restarts the hand; setup, busy and completed st
   for (let i = 0; i < s.lessonTotal; i++) {
     assert.equal(s.lessonIndex, i);
     assert.equal(calls.getSwipeGuide.at(-1)[0], s.lesson[i]);
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
     clock.advance(900);
     clock.fire(s.frameTimer);
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0.5, false]);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0.5, false]);
     const guides = calls.drawGuide.length;
     const lookups = calls.getSwipeGuide.length;
     s.requestMove(s.lesson[i]);
@@ -1092,7 +1210,7 @@ for (const followHint of [true, false]) {
     s.showHint();
     assert.equal(s.sameMove(s.hintMove, inverse), true);
     assert.equal(calls.getSwipeGuide.at(-1)[0], s.hintMove);
-    assert.deepEqual(calls.drawGuide.at(-1), [s.context2d, guide, 0, s.phase !== 'tutorial']);
+    assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, 0, s.phase !== 'tutorial']);
     assert.match(s.hint, /跟随小手沿轨迹滑动，松手转层/);
     assert.equal(s.assisted, true);
     const guides = calls.drawGuide.length;
@@ -2142,4 +2260,67 @@ test('passed teaching board supports view inspection without layer moves or begi
   assert.equal(calls.feedback.length, feedback);
   assert.equal(calls.drawBeginnerGuides.length, corners, 'never suggest turning layers after passing');
   assert.equal(calls.teachingRecords.length, 1);
+});
+
+for (const first of ['base', 'guidance']) {
+  test(`layer readiness ${first}-first waits for both canvases and matching logical dimensions`, t => {
+    const h = harness(t, { canvasReady: true });
+    const { state: s, calls } = h;
+    showTarget(h, 'history');
+    s.canvasDisappeared();
+    s.guidanceDisappeared();
+    const draws = calls.draw.length;
+    const hands = calls.drawGuide.length;
+    s[first === 'base' ? 'canvasMounted' : 'guidanceMounted']();
+    assert.equal(calls.drawGuide.length, hands, 'no guide before both layers are ready');
+    s[first === 'base' ? 'guidanceMounted' : 'canvasMounted']();
+    assert.equal(calls.draw.length, draws + 1, 'only mounting the base renders cube geometry');
+    assert.equal(calls.drawGuide.length, hands + 1);
+    assert.equal(calls.drawGuide.at(-1)[0], s.guidanceContext);
+    assert.notEqual(s.context2d, s.guidanceContext);
+
+    const area = { width: 380, height: 310 };
+    const beforeResize = calls.drawGuide.length;
+    if (first === 'base') s.canvasResized(area); else s.guidanceResized(area);
+    assert.equal(calls.drawGuide.length, beforeResize, 'mismatched sizes cannot draw stale coordinates');
+    if (first === 'base') s.guidanceResized(area); else s.canvasResized(area);
+    assert.equal(calls.drawGuide.length, beforeResize + 1);
+    assert.deepEqual(s.guidanceContext.clears.at(-1), [0, 0, area.width, area.height]);
+    assert.deepEqual(calls.draw.at(-1).slice(1, 3), [area.width, area.height]);
+    assert.ok(calls.draw.every(args => args[0] === s.context2d));
+    assert.ok(calls.drawGuide.every(args => args[0] === s.guidanceContext));
+    assert.ok(calls.drawBeginnerGuides.every(args => args[0] === s.guidanceContext));
+  });
+}
+
+test('overlay cleanup on busy, background, unmount and no target never clears or redraws the base', t => {
+  const h = harness(t, { canvasReady: true });
+  const { state: s, calls } = h;
+  showTarget(h, 'history');
+  const draws = calls.draw.length;
+  const hands = calls.drawGuide.length;
+  const clears = s.guidanceContext.clears.length;
+  s.animate([s.faceMove('U')], 'user');
+  assert.equal(calls.draw.length, draws);
+  assert.equal(calls.drawGuide.length, hands);
+  assert.ok(s.guidanceContext.clears.length > clears, 'busy immediately erases old guidance');
+  s.foreground = false;
+  s.onForegroundChanged();
+  s.guidanceDisappeared();
+  assert.equal(s.guidanceReady, false);
+  s.drawGuidance();
+  assert.equal(calls.drawGuide.length, hands);
+  assert.equal(calls.draw.length, draws);
+  assert.equal(s.context2d.clears.length, 0, 'guidance never clears the base context');
+  s.foreground = true;
+  s.busy = false;
+  s.activeMove = null;
+  s.hintMove = null;
+  s.beginnerGuides = false;
+  s.guidanceMounted();
+  assert.equal(calls.drawGuide.length, hands);
+  assert.equal(calls.draw.length, draws);
+  s.beginnerGuides = true;
+  s.drawGuidance();
+  assert.equal(calls.drawBeginnerGuides.at(-1)[0], s.guidanceContext);
 });

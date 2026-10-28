@@ -27,7 +27,7 @@ const LOCALE_STRINGS = RESOURCE_LOCALE === 'en' ? ENGLISH_STRINGS : BASE_STRINGS
 // --check-gestures runs ONLY the real renderer/model checks, without HDC or artifacts.
 const OUT = process.env.SMOKE_OUT ? resolve(process.env.SMOKE_OUT) : join(ROOT, 'verification', 'gestures');
 const CASE_NAMES = ['order-2', 'order-4', 'order-5', 'order-3', 'tutorial', 'free-move-undo',
-  'surface-swipe', 'scramble-timer-hint-back', 'gesture-guides-switch', 'statistics', 'settings-persistence'];
+  'surface-swipe', 'scramble-timer-hint-back', 'hint-repeat-stability', 'gesture-guides-switch', 'statistics', 'settings-persistence'];
 const SELECTED_CASES = process.env.SMOKE_CASES === undefined ? null :
   new Set(process.env.SMOKE_CASES.split(',').map(value => value.trim()).filter(Boolean));
 if (SELECTED_CASES && (SELECTED_CASES.size === 0 || [...SELECTED_CASES].some(name => !CASE_NAMES.includes(name)))) {
@@ -335,9 +335,20 @@ function centiseconds(state) {
   const match = timer(state)?.match(/^(\d+):(\d{2})\.(\d{2})$/);
   return match ? Number(match[1]) * 6000 + Number(match[2]) * 100 + Number(match[3]) : null;
 }
-const gameCanvas = state => state.nodes.find(n => n.type === 'Canvas' && usable(n, state) && n.enabled);
+const gameCanvas = state => state.nodes.find(n => n.type === 'Canvas' &&
+  n.a.id === 'cube-base-canvas' && usable(n, state) && n.enabled);
 // Action buttons are disabled while the renderer is animating; face buttons no longer exist.
-const idleControls = state => Boolean(gameCanvas(state)) && enabledButton(state, '打乱') && enabledButton(state, '教程');
+// UI Test omits bottom controls pushed outside the Scroll viewport by hint text.
+// A committed tutorial instruction or an enabled history action identifies those
+// states; actual taps still require a visible usable button.
+const idleControls = state => {
+  if (!gameCanvas(state)) return false;
+  const controls = ['打乱', '教程'].map(label => state.nodes.find(n => n.type === 'Button' &&
+    descendants(n).some(child => matches(child, label))));
+  if (controls.some(Boolean)) return controls.every(n => n?.enabled);
+  return enabledButton(state, BASE_STRINGS.history_help) ||
+    (lesson(state) !== null && enabledButton(state, '正视角'));
+};
 function assertTouchOnly(state) {
   // Inspect the entire dump, including offscreen/disabled descendants: hiding the old
   // controls below a scroll boundary is not removal of the twelve face buttons.
@@ -349,8 +360,10 @@ function assertTouchOnly(state) {
   check(obsolete.length === 0, 'no twelve face buttons or obsolete face-control title/instructions', {
     obsolete: obsolete.map(n => ({ text: n.text, type: n.type, bounds: n.a.bounds }))
   });
-  check(['打乱', '教程', '复位', /撤销/, BASE_STRINGS.history_help, '正视角'].every(label => button(state, label)),
-    'retains scramble/tutorial/reset/undo/history/view controls');
+  const labels = lesson(state) !== null ? [/撤销/, BASE_STRINGS.history_help, '正视角'] :
+    ['打乱', '教程', '复位', /撤销/, BASE_STRINGS.history_help, '正视角'];
+  check(labels.every(label => button(state, label)),
+    'retains phase-visible game controls; tutorial text may push bottom actions offscreen');
 }
 function lesson(state) {
   for (const node of state.nodes.filter(n => usable(n, state))) {
@@ -702,6 +715,34 @@ async function main() {
     await tapDialog('返回首页？', '返回首页');
     await waitFor('confirmed return home', isHome);
     check(true, 'leave dialog confirmation returns home');
+  });
+
+  await runCase('hint-repeat-stability', async () => {
+    await game(3);
+    await swipeFace('U');
+    await waitFor('one turn before repeated hints', s => moves(s) === 1 && idleControls(s));
+    const hintIdle = s => Boolean(gameCanvas(s)) && enabledButton(s, BASE_STRINGS.history_help) && enabledButton(s, /撤销/);
+    await tap(BASE_STRINGS.history_help);
+    await waitFor('first history hint visible', s =>
+      has(s, resourcePattern(BASE_STRINGS.history_hint).pattern) && hintIdle(s), WAIT_MS, 2);
+    const targetText = latest.nodes.find(n => matches(n, resourcePattern(BASE_STRINGS.history_hint).pattern))?.text;
+    // The first hint may reflow the page; only subsequent requests must preserve this layout.
+    const before = gameCanvas(await capture('repeat-hint-before')).a.bounds;
+    for (let i = 0; i < 12; i++) {
+      const state = dump();
+      tapNode(button(state, BASE_STRINGS.history_help), `repeat history hint ${i + 1}`);
+      check(moves(state) === 1 && timer(state) === '00:00.00' && hintIdle(state),
+        `repeat hint ${i + 1} preserves moves, timer and idle controls`);
+    }
+    let state = await waitFor('same hint after repeated requests', s => has(s, targetText) && moves(s) === 1 && hintIdle(s));
+    check(gameCanvas(state).a.bounds === before, 'repeated hints do not shift or resize the cube');
+    const overlay = state.nodes.find(n => n.a.id === 'cube-guidance-canvas' && n.type === 'Canvas');
+    check(overlay?.a.bounds === before, 'independent guidance canvas exactly overlays the cube');
+    await capture('repeat-hint-after');
+    await tap(/撤销/);
+    state = await waitFor('undo after repeated hints', s => moves(s) === 0 && !has(s, targetText) && idleControls(s));
+    check(timer(state) === '00:00.00', 'repeated hints and undo do not start free-practice timer');
+    await capture('repeat-hint-undo');
   });
 
   await runCase('gesture-guides-switch', async () => {

@@ -38,12 +38,18 @@ struct Index {
   private textCache: Map<string, string> = new Map<string, string>();
   private hintKey: string = '';
   private hintArgs: Array<string | number> = [];
+  private gestureHelpSeen: boolean = false;
 
   private model: CubeModel = new CubeModel(3);
   private renderer: CubeRenderer = new CubeRenderer();
   private store: CubeStore = new CubeStore();
   private feedback: CubeFeedback = new CubeFeedback();
   private context2d: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private guidanceContext: CanvasRenderingContext2D = new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private guidanceReady: boolean = false;
+  private guidanceWidth: number = 0;
+  private guidanceHeight: number = 0;
+  private guidanceDirty: boolean = true;
   private gameScroller: Scroller = new Scroller();
   private canvasWidth: number = 320;
   private canvasHeight: number = 320;
@@ -186,6 +192,7 @@ struct Index {
 
   private onForegroundChanged(): void {
     if (!this.foreground) {
+      this.clearGuidance();
       if (this.phase === 'playing') {
         this.timeBase += Date.now() - this.startedAt;
         this.elapsed = this.timeBase;
@@ -208,39 +215,58 @@ struct Index {
   private resetGuide(): void {
     this.guideAt = -1;
     this.guideHidden = false;
+    this.guidanceDirty = true;
   }
 
   private draw(progress: number = 0): void {
     if (!this.canvasReady) { this.resetGuide(); return; }
     this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
       this.model, this.yaw, this.pitch, this.activeMove, progress, this.cubeZoom);
-    if (this.busy || this.page !== 'game' || (this.challengeIndex >= 0 && this.phase === 'solved')) {
+    this.drawGuidance();
+  }
+
+  private clearGuidance(): void {
+    if (this.guidanceReady) {
+      this.guidanceContext.clearRect(0, 0, this.guidanceWidth, this.guidanceHeight);
+    }
+  }
+
+  private drawGuidance(): void {
+    // The cube remains untouched between real scene changes. Hint animation clears
+    // only this transparent layer, independently of the static cube rendering.
+    this.clearGuidance();
+    if (!this.canvasReady || !this.guidanceReady || this.guidanceWidth !== this.canvasWidth ||
+      this.guidanceHeight !== this.canvasHeight || !this.foreground ||
+      this.busy || this.page !== 'game' || (this.challengeIndex >= 0 && this.phase === 'solved')) {
       this.resetGuide();
       return;
     }
+    this.guidanceDirty = false;
     const target = this.guideTarget();
     if (target === null) {
       this.resetGuide();
-      if (this.beginnerGuides) { this.renderer.drawBeginnerGuides(this.context2d); }
+      this.guidanceDirty = false;
+      if (this.beginnerGuides) { this.renderer.drawBeginnerGuides(this.guidanceContext); }
       return;
     }
-    if (!this.foreground || this.touching) { this.resetGuide(); return; }
+    if (this.touching) { this.resetGuide(); return; }
     const guide = this.renderer.getSwipeGuide(target);
     this.guideHidden = guide === null;
     if (guide === null) { this.guideAt = -1; return; }
     const now = Date.now();
     if (this.guideAt < 0) { this.guideAt = now; }
-    this.renderer.drawGuide(this.context2d, guide, Math.max(0, now - this.guideAt) % 1800 / 1800,
+    this.renderer.drawGuide(this.guidanceContext, guide, Math.max(0, now - this.guideAt) % 1800 / 1800,
       this.phase !== 'tutorial');
   }
 
   private frame(): void {
     if (!this.foreground) { return; }
     if (!this.busy) {
-      if (this.canvasReady && this.page === 'game' && !this.touching && this.guideTarget() !== null) {
-        // An offscreen target waits for a view/canvas change instead of repainting nothing.
-        if (!this.guideHidden) { this.draw(); }
-      } else { this.resetGuide(); }
+      if (this.canvasReady && this.page === 'game' && !this.touching && this.guideTarget() !== null &&
+        (this.guidanceDirty || !this.guideHidden)) {
+        // Hidden targets and static corner guides wait for a scene/input change.
+        this.drawGuidance();
+      }
       return;
     }
     if (this.activeMove === null) { return; }
@@ -294,6 +320,7 @@ struct Index {
     this.activeMove = this.queue.shift() as CubeMove;
     this.animationAt = Date.now();
     this.busy = true;
+    this.drawGuidance();
   }
 
   private resetSession(): void {
@@ -406,6 +433,10 @@ struct Index {
     this.cubeZoom = 1.12;
     this.canvasReady = false;
     this.page = 'game';
+    if (!this.gestureHelpSeen) {
+      this.gestureHelpSeen = true;
+      this.setHint('gesture_help');
+    }
   }
 
   private leavePage(): void {
@@ -541,7 +572,7 @@ struct Index {
       this.startedAt = Date.now();
       this.setHint();
     }
-    if (this.hintMove !== null) { this.setHint(); }
+    if (this.hintMove !== null || this.hintKey === 'gesture_help') { this.setHint(); }
     this.hintMove = null;
     this.animate([move], 'user');
   }
@@ -564,11 +595,14 @@ struct Index {
     const solution = this.model.getSolution();
     if (solution.length > 0) {
       this.assisted = true;
+      // Repeated taps must not restart an already visible cycle or redraw the cube.
+      if (this.hintMove !== null && this.sameMove(this.hintMove, solution[0]) &&
+        !this.guideHidden && this.guideAt >= 0 && this.guidanceReady && !this.guidanceDirty) { return; }
       this.hintMove = solution[0];
       this.resetGuide();
       if (this.challengeIndex >= 0) { this.setHint('teaching_history_hint', this.moveLabel(solution[0])); }
       else { this.setHint('history_hint', this.moveLabel(solution[0])); }
-      this.draw();
+      this.drawGuidance();
     }
   }
 
@@ -766,7 +800,7 @@ struct Index {
       const hideGuide = !this.touching && !this.busy && this.page === 'game' && this.guideTarget() !== null;
       this.touching = true;
       this.resetGuide();
-      if (hideGuide) { this.draw(); }
+      if (hideGuide) { this.drawGuidance(); }
       return;
     }
     if (event.type !== TouchType.Move) { return; }
@@ -795,7 +829,7 @@ struct Index {
 
   private setBeginnerGuides(value: boolean): void {
     this.beginnerGuides = value;
-    this.draw();
+    this.drawGuidance();
     this.saveSettings();
   }
 
@@ -863,9 +897,11 @@ struct Index {
   @Builder
   private cubeCanvas() {
     Canvas(this.context2d)
+      .id('cube-base-canvas')
       .width('100%')
       .height('100%')
       .onReady(() => { this.canvasReady = true; this.resetGuide(); this.draw(); })
+      .onDisAppear(() => { this.canvasReady = false; this.clearGuidance(); this.resetGuide(); })
       .onAreaChange((_old: Area, area: Area) => {
         this.invalidateGesture();
         this.canvasWidth = Number(area.width);
@@ -874,6 +910,25 @@ struct Index {
       })
       .onTouch((event: TouchEvent) => this.touch(event))
       .accessibilityText(this.tr('cube_accessibility', this.order))
+  }
+
+  @Builder
+  private guidanceCanvas() {
+    Canvas(this.guidanceContext)
+      .id('cube-guidance-canvas')
+      .width('100%')
+      .height('100%')
+      .hitTestBehavior(HitTestMode.None)
+      .accessibilityLevel('no')
+      .onReady(() => { this.guidanceReady = true; this.resetGuide(); this.drawGuidance(); })
+      .onDisAppear(() => { this.clearGuidance(); this.guidanceReady = false; this.resetGuide(); })
+      .onAreaChange((_old: Area, area: Area) => {
+        this.clearGuidance();
+        this.guidanceWidth = Number(area.width);
+        this.guidanceHeight = Number(area.height);
+        this.resetGuide();
+        this.drawGuidance();
+      })
   }
 
   private orderDescription(value: number): string {
@@ -926,6 +981,7 @@ struct Index {
         .stroke('#CFDDCE').strokeWidth(1).hitTestBehavior(HitTestMode.None)
       Circle().width(158).height(158).fill('#DEE9DA').hitTestBehavior(HitTestMode.None)
       this.cubeCanvas()
+      this.guidanceCanvas()
     }.width('100%').height('100%')
       .linearGradient({ angle: 135, colors: [['#EFF4E7', 0], ['#E1ECE2', 1]] })
       .borderRadius(28).clip(true)
@@ -1089,16 +1145,26 @@ struct Index {
     }.width('100%').height('100%').constraintSize({ maxWidth: 600 }).padding({ left: 22, right: 22, top: 10 })
   }
 
+  private showTeachingGoal(): void {
+    if (!this.foreground || this.page !== 'game' || this.challengeIndex < 0 ||
+      this.challengeIndex >= this.challenges.length) { return; }
+    const challenge = this.challenges[this.challengeIndex];
+    this.getUIContext().showAlertDialog({
+      title: this.tr('teaching_level', this.challengeIndex + 1) + ' · ' + this.tr(challenge.titleKey),
+      message: this.tr('teaching_goal_summary') + '\n\n' + this.tr(challenge.tipKey) + '\n\n' +
+        this.tr('teaching_level_details', this.order, challenge.referenceMoves) + '\n\n' +
+        this.tr('teaching_start_hint') + '\n\n' + this.tr('teaching_hint_note'),
+      primaryButton: { value: this.tr('teaching_goal_close'), action: () => {} }
+    });
+  }
+
   @Builder
   private teachingGoal() {
-    if (this.challengeIndex >= 0) {
-      Column({ space: 6 }) {
-        Text(this.tr('teaching_goal')).fontSize(13).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-        Text(this.tr(this.challenges[this.challengeIndex].tipKey)).fontSize(11).lineHeight(18).fontColor(CubeTheme.secondary)
-        Text(this.tr('teaching_level_details', this.order, this.challenges[this.challengeIndex].referenceMoves))
-          .fontSize(10).fontColor(CubeTheme.green)
-      }.width('100%').alignItems(HorizontalAlign.Start).padding(14).backgroundColor(CubeTheme.surface).borderRadius(18)
-    }
+    Button(this.tr('teaching_goal_button'), { type: ButtonType.Normal }).width(52).height(44).borderRadius(12)
+      .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(12)
+      .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 1 })
+      .accessibilityText(this.tr('teaching_goal_details'))
+      .onClick(() => this.showTeachingGoal())
   }
 
   @Builder
@@ -1114,17 +1180,6 @@ struct Index {
           .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontWeight(FontWeight.Bold)
           .enabled(!this.busy).onClick(() => this.nextChallenge())
       }
-      Row({ space: 10 }) {
-        Button(this.tr('teaching_retry'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-          .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14)
-          .enabled(!this.busy).onClick(() => this.retryChallenge())
-        Button(this.tr('teaching_back'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-          .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14)
-          .onClick(() => this.goHome())
-      }.width('100%')
-      if (this.phase !== 'solved') {
-        Text(this.tr('teaching_hint_note')).fontSize(10).lineHeight(17).fontColor(CubeTheme.secondary).width('100%')
-      }
     }.width('100%')
   }
 
@@ -1138,19 +1193,24 @@ struct Index {
             if (this.challengeIndex >= 0) {
               Text(this.tr('teaching_level', this.challengeIndex + 1) + ' · ' +
                 this.tr(this.challenges[this.challengeIndex].titleKey))
-                .fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).maxLines(2)
+                .fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             } else {
               Text(this.tr('cube_title', this.order)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
             }
             Row({ space: 5 }) {
               Circle().width(5).height(5).fill(CubeTheme.green)
               Text(this.phaseLabel()).fontSize(11).fontColor(CubeTheme.green)
-            }
+              if (this.challengeIndex >= 0) {
+                Text(this.tr('teaching_goal_summary')).fontSize(11).fontColor(CubeTheme.secondary)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+              }
+            }.width('100%')
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        }.width('100%').constraintSize({ minHeight: 48 })
-        if (this.challengeIndex >= 0) {
-          this.teachingGoal()
-        }
+          if (this.challengeIndex >= 0) {
+            this.teachingGoal()
+          }
+        }.width('100%').constraintSize({ minHeight: 48 }).id('game-header')
         Row() {
           Column({ space: 3 }) {
             Text(this.tr('elapsed_time')).fontSize(11).fontColor('#C3D2CA')
@@ -1166,55 +1226,69 @@ struct Index {
         Stack() {
           this.cubeStage()
         }.width('100%').height(Math.max(240, Math.min(480,
-          this.viewportHeight - 370 - (this.challengeIndex >= 0 ? 120 : 0))))
-        Row({ space: 12 }) {
+          this.viewportHeight - 310)))
+        Row({ space: 8 }) {
+          if (this.challengeIndex >= 0) {
+            Button(this.tr('teaching_retry'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
+              .padding({ left: 4, right: 4 }).fontSize(14).labelStyle({ maxLines: 2 })
+              .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontWeight(FontWeight.Bold)
+              .enabled(!this.busy).onClick(() => this.retryChallenge())
+          } else {
+            Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
+              .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
+              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
+              .enabled(!this.busy).onClick(() => this.scramble())
+          }
           Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
             .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(14).fontWeight(FontWeight.Bold)
+            .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
             .enabled(!this.busy && this.moves > 0 && this.phase !== 'tutorial' && this.phase !== 'solved')
             .onClick(() => this.undo())
           Button(this.tr('history_help'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
-            .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).fontWeight(FontWeight.Bold)
+            .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(14).fontWeight(FontWeight.Bold)
+            .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
             .enabled(!this.busy && this.phase !== 'tutorial' && this.phase !== 'solved')
             .onClick(() => this.showHint())
-        }.width('100%')
+        }.width('100%').id('game-primary-tools')
         Row({ space: 6 }) {
-          Text(this.guideTarget() !== null ? this.tr('guided_help') :
-            this.tr('gesture_help'))
-            .fontSize(10).lineHeight(16).fontColor(CubeTheme.secondary).layoutWeight(1)
+          if (this.challengeIndex >= 0) {
+            Button(this.tr('teaching_back'), { type: ButtonType.Normal }).layoutWeight(2).height(48).borderRadius(12)
+              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(13)
+              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
+              .onClick(() => this.goHome())
+          } else {
+            Button(this.tr('tutorial'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(12)
+              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(13).enabled(!this.busy)
+              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
+              .onClick(() => this.startLesson())
+            Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(12)
+              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(13)
+              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
+              .enabled(!this.busy).onClick(() => this.confirmReset())
+          }
+          Button(this.tr('reset_view'), { type: ButtonType.Normal }).layoutWeight(1).height(44)
+            .padding({ left: 4, right: 4 }).fontSize(12).labelStyle({ maxLines: 2 }).borderRadius(12)
+            .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.green)
+            .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
           Column({ space: 4 }) {
-            Text(this.tr('guides_label')).fontSize(11).fontColor(CubeTheme.secondary).maxLines(1)
+            Text(this.tr('guides_label')).fontSize(11).fontColor(CubeTheme.secondary).maxLines(2)
+              .textAlign(TextAlign.Center)
             Toggle({ type: ToggleType.Switch, isOn: this.beginnerGuides }).width(44).height(28)
               .selectedColor(CubeTheme.green).switchStyle({ unselectedColor: CubeTheme.line })
               .responseRegion({ x: -10, y: -8, width: 64, height: 44 })
               .accessibilityText(this.tr('guides_accessibility', this.beginnerGuides ? this.tr('on') : this.tr('off')))
               .onChange((value: boolean) => this.setBeginnerGuides(value))
-          }.width(84).constraintSize({ minHeight: 52 })
-          Button(this.tr('reset_view'), { type: ButtonType.Normal }).width(58).height(44)
-            .padding({ left: 4, right: 4 }).fontSize(11).borderRadius(12)
-            .backgroundColor(CubeTheme.surface).fontColor(CubeTheme.green)
-            .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
-        }.width('100%')
-        if (this.hint.length > 0) {
+          }.width(74).constraintSize({ minHeight: 52 }).padding({ bottom: 8 })
+        }.width('100%').id('game-secondary-tools')
+        if (this.hint.length > 0 && this.hintKey !== 'teaching_start_hint') {
           Text(this.hint).fontSize(12).lineHeight(19).fontColor(CubeTheme.green)
             .width('100%').padding(12).backgroundColor(CubeTheme.mint).borderRadius(14)
         }
-        Column({ space: 10 }) {
-          if (this.challengeIndex >= 0) {
+        if (this.challengeIndex >= 0 && this.phase === 'solved') {
+          Column() {
             this.teachingControls()
-          } else {
-            Row({ space: 8 }) {
-              Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-                .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
-                .enabled(!this.busy).onClick(() => this.scramble())
-              Button(this.tr('tutorial'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-                .backgroundColor(CubeTheme.ink).fontColor('#FFFFFF').fontSize(14).enabled(!this.busy)
-                .onClick(() => this.startLesson())
-              Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(14)
-                .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(14)
-                .enabled(!this.busy).onClick(() => this.confirmReset())
-            }.width('100%').margin({ top: 4 })
-          }
-        }.width('100%').padding(14).backgroundColor(CubeTheme.surface).borderRadius(24)
+          }.width('100%').padding(14).backgroundColor(CubeTheme.surface).borderRadius(24)
+        }
       }.width('100%').constraintSize({ maxWidth: 600 }).padding({ left: 18, right: 18, top: 10, bottom: 16 })
     }.width('100%').height('100%').scrollBar(BarState.Off)
       .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer) =>

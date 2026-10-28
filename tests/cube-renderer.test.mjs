@@ -806,6 +806,172 @@ test('moving hands stay inside small canvases for each order, face and turn dire
   assert.ok(checked > 500);
 });
 
+function countGuideSearch(renderer) {
+  const calls = { boxHit: 0, pickMove: 0 };
+  // Type stripping exposes these methods; count real work, not wall-clock time.
+  for (const name of Object.keys(calls)) {
+    const original = renderer[name];
+    renderer[name] = function (...args) {
+      calls[name]++;
+      return original.apply(this, args);
+    };
+  }
+  return calls;
+}
+
+test('swipe guide cache reuses equal-value targets and snapshots mutable move fields', () => {
+  const renderer = new CubeRenderer();
+  const model = seededModel(3);
+  const before = snapshot(model);
+  const calls = countGuideSearch(renderer);
+  const move = new CubeMove('y', 1, 1);
+  renderer.draw(new CheckingCanvas(), width, height, model, 0.62, -0.42);
+  let guide = renderer.getSwipeGuide(move);
+  assert.ok(guide instanceof CubeSwipeGuide);
+  assert.ok(calls.boxHit > 0 && calls.pickMove > 0, 'first request performs a real geometric search');
+  for (const [field, value] of [['axis', 'x'], ['layer', 0], ['turns', -1]]) {
+    assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
+      model, 0.62, -0.42)), moveKey(move));
+    const searched = { ...calls };
+    for (let i = 0; i < 3; i++) {
+      assert.deepEqual(renderer.getSwipeGuide(new CubeMove(move.axis, move.layer, move.turns)), guide);
+    }
+    assert.deepEqual(calls, searched, 'new moves with equal values reuse the search result');
+    const previous = new CubeMove(move.axis, move.layer, move.turns);
+    move[field] = value;
+    assert.deepEqual(renderer.getSwipeGuide(previous), guide, 'caller mutation cannot rewrite the cached key');
+    assert.deepEqual(calls, searched, 'the saved target is a value snapshot, not a caller-owned reference');
+    guide = renderer.getSwipeGuide(move);
+    assert.ok(guide instanceof CubeSwipeGuide);
+    assert.ok(calls.boxHit > searched.boxHit && calls.pickMove > searched.pickMove,
+      `changing only ${field} must search again`);
+  }
+  assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
+    model, 0.62, -0.42)), moveKey(move));
+  assert.equal(snapshot(model), before, 'cached requests must not mutate puzzle state or history');
+});
+
+test('swipe guide cache recomputes after view, zoom and size redraws', () => {
+  const renderer = new CubeRenderer();
+  const model = seededModel(3);
+  const context = new CheckingCanvas();
+  const calls = countGuideSearch(renderer);
+  const move = new CubeMove('y', 1, 1);
+  for (const [w, h, yaw, pitch, zoom] of [
+    [420, 500, 0, 0, 1], [420, 500, 0.62, 0, 1], [420, 500, 0.62, -0.42, 1],
+    [420, 500, 0.62, -0.42, 1.25], [480, 500, 0.62, -0.42, 1.25],
+    [480, 560, 0.62, -0.42, 1.25], [480, 560, 0.62, -0.42, 1.25]
+  ]) {
+    renderer.draw(context, w, h, model, yaw, pitch, null, 0, zoom);
+    const before = { ...calls };
+    const guide = renderer.getSwipeGuide(move);
+    assert.ok(guide instanceof CubeSwipeGuide);
+    assert.ok(calls.boxHit > before.boxHit && calls.pickMove > before.pickMove,
+      'each draw clears the search result, even when scene parameters are unchanged');
+    const searched = { ...calls };
+    assert.deepEqual(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), guide);
+    assert.deepEqual(calls, searched, 'the new stable frame can reuse its result');
+    assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
+      model, yaw, pitch)), moveKey(move), 'recomputed guidance must execute in the new geometry');
+  }
+});
+
+test('swipe guide cache rejects moved/reset geometry until a fresh draw', () => {
+  for (const [label, mutate] of [
+    ['move', model => model.applyMove(new CubeMove('x', 0, 1), false)],
+    ['same-order reset', model => model.reset()],
+    ['order change', model => model.reset(4)]
+  ]) {
+    const renderer = new CubeRenderer();
+    const model = new CubeModel(3);
+    const context = new CheckingCanvas();
+    const calls = countGuideSearch(renderer);
+    const move = new CubeMove('y', 1, 1);
+    renderer.draw(context, width, height, model, 0, 0);
+    assert.ok(renderer.getSwipeGuide(move));
+    const searched = { ...calls };
+    mutate(model);
+    for (let i = 0; i < 2; i++) {
+      assert.equal(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), null, `${label} makes cached geometry stale`);
+    }
+    assert.deepEqual(calls, searched, 'stale geometry must be rejected before cached reuse or a new search');
+    renderer.draw(context, width, height, model, 0, 0);
+    const guide = renderer.getSwipeGuide(move);
+    assert.ok(guide instanceof CubeSwipeGuide);
+    assert.ok(calls.boxHit > searched.boxHit && calls.pickMove > searched.pickMove, `${label} needs a new search`);
+    const refreshed = { ...calls };
+    assert.deepEqual(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), guide);
+    assert.deepEqual(calls, refreshed);
+    assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
+      model, 0, 0)), moveKey(move));
+  }
+});
+
+test('swipe guide cache does not bypass invalid targets, draws or animation', () => {
+  const renderer = new CubeRenderer();
+  const model = new CubeModel(3);
+  const context = new CheckingCanvas();
+  const calls = countGuideSearch(renderer);
+  const move = new CubeMove('y', 1, 1);
+  assert.equal(renderer.getSwipeGuide(move), null, 'no geometry before the first draw');
+  assert.deepEqual(calls, { boxHit: 0, pickMove: 0 });
+  renderer.draw(context, width, height, model, 0, 0);
+  const guide = renderer.getSwipeGuide(move);
+  assert.ok(guide);
+  const searched = { ...calls };
+  for (const [layer, turns] of [[-1, 1], [3, 1], [0.5, 1], [NaN, 1], [Infinity, 1],
+    [1, 0], [1, 2], [1, -2], [1, NaN], [1, Infinity]]) {
+    // The constructor rejects bad values; exercise the renderer guard after caller mutation.
+    const invalid = new CubeMove('y', 1, 1);
+    invalid.layer = layer;
+    invalid.turns = turns;
+    assert.equal(renderer.getSwipeGuide(invalid), null, 'invalid targets never reuse a guide');
+  }
+  assert.deepEqual(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), guide);
+  assert.deepEqual(calls, searched, 'invalid requests neither search nor evict the valid target');
+  for (const [w, h, yaw, pitch, animation, progress] of [
+    [0, height, 0, 0, null, 0], [width, 0, 0, 0, null, 0],
+    [NaN, height, 0, 0, null, 0], [width, Infinity, 0, 0, null, 0],
+    [width, height, NaN, 0, null, 0], [width, height, 0, Infinity, null, 0],
+    [width, height, 0, 0, move, 0], [width, height, 0, 0, move, 0.5], [width, height, 0, 0, move, 1]
+  ]) {
+    renderer.draw(context, width, height, model, 0, 0);
+    assert.ok(renderer.getSwipeGuide(move), 'warm a valid result before each rejected frame');
+    const before = { ...calls };
+    renderer.draw(context, w, h, model, yaw, pitch, animation, progress);
+    assert.equal(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), null,
+      'invalid draws and all animation phases must hide the warmed guide');
+    assert.deepEqual(calls, before, 'rejected frames cannot launch a geometry search');
+  }
+});
+
+test('swipe guide cache reuses null results and searches again after a view change', () => {
+  const renderer = new CubeRenderer();
+  const model = new CubeModel(3);
+  const context = new CheckingCanvas();
+  const calls = countGuideSearch(renderer);
+  renderer.draw(context, width, height, model, 0, 0);
+  assert.ok(renderer.getSwipeGuide(new CubeMove('y', 1, 1)));
+  const before = { ...calls };
+  const move = new CubeMove('z', 2, 1);
+  assert.equal(renderer.getSwipeGuide(move), null, 'the front normal axis has no executable swipe head-on');
+  assert.ok(calls.boxHit > before.boxHit, 'null must come from a real search, not missing geometry');
+  const searched = { ...calls };
+  for (let i = 0; i < 3; i++) {
+    assert.equal(renderer.getSwipeGuide(new CubeMove('z', 2, 1)), null);
+  }
+  assert.deepEqual(calls, searched, 'a cached null result must not repeat geometric work');
+  renderer.draw(context, width, height, model, 0.62, -0.42);
+  const guide = renderer.getSwipeGuide(new CubeMove('z', 2, 1));
+  assert.ok(guide instanceof CubeSwipeGuide, 'another view makes the previously unavailable target reachable');
+  assert.ok(calls.boxHit > searched.boxHit && calls.pickMove > searched.pickMove);
+  const refreshed = { ...calls };
+  assert.deepEqual(renderer.getSwipeGuide(new CubeMove('z', 2, 1)), guide);
+  assert.deepEqual(calls, refreshed);
+  assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
+    model, 0.62, -0.42)), moveKey(move));
+});
+
 test('guide cache lifetime, invalidation, logical units, overlay and Canvas restoration', () => {
   const renderer = new CubeRenderer();
   const model = new CubeModel(3);

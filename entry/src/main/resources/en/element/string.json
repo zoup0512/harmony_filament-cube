@@ -389,6 +389,10 @@
       "value": "Goal: make each of the six faces one solid color."
     },
     {
+      "name": "teaching_goal_button",
+      "value": "Goal"
+    },
+    {
       "name": "teaching_start_hint",
       "value": "Your first swipe to turn a layer starts the timer. Solve any way you choose."
     },
@@ -447,6 +451,18 @@
     {
       "name": "teaching_previous_save_failed",
       "value": "The previous learning progress could not be saved."
+    },
+    {
+      "name": "teaching_goal_summary",
+      "value": "Goal: solve all faces"
+    },
+    {
+      "name": "teaching_goal_details",
+      "value": "View this level's goal, reference moves and hint rules"
+    },
+    {
+      "name": "teaching_goal_close",
+      "value": "Got it"
     },
     {
       "name": "teaching_hint_note",

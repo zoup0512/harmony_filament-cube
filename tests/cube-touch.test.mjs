@@ -18,7 +18,7 @@ function member(name) {
 }
 const names = ['touch', 'invalidateGesture', 'layerGestureCurrent', 'setTouchOrigin',
   'moveOrbit', 'judgeScrollGesture', 'animate', 'resetSession', 'onForegroundChanged',
-  'undo', 'aboutToDisappear', 'guideTarget', 'resetGuide', 'tr', 'setHint', 'toast',
+  'undo', 'aboutToDisappear', 'guideTarget', 'resetGuide', 'clearGuidance', 'tr', 'setHint', 'toast',
   'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge', 'leavePage', 'goHome'];
 const fields = source.match(/^struct Index \{\r?\n([\s\S]*?)(?=^  aboutToAppear\()/m);
 assert.ok(fields, 'production field defaults must be extractable');
@@ -38,7 +38,7 @@ function point(id, x, y) {
   return { id, x, y, windowX: x + 400, windowY: y + 600, screenX: x + 800, screenY: y + 1000 };
 }
 function harness({ hit = true, busy = false, page = 'game', pickedMove = new CubeMove('x', 1, 1) } = {}) {
-  const calls = { hitTest: [], pickMove: [], requestMove: [], draw: [], timers: [], release: [], dialogs: [] };
+  const calls = { hitTest: [], pickMove: [], requestMove: [], draw: [], guidance: [], timers: [], release: [], dialogs: [] };
   const state = Object.assign(new TouchHarness(), {
     page, busy, moves: 7,
     getUIContext: () => ({
@@ -52,6 +52,7 @@ function harness({ hit = true, busy = false, page = 'game', pickedMove = new Cub
     // Leave busy unchanged so duplicate submissions cannot hide behind a mock.
     requestMove(...args) { calls.requestMove.push(args); },
     draw(...args) { calls.draw.push(args); },
+    drawGuidance(...args) { calls.guidance.push(args); },
     startTimers() { calls.timers.push('start'); },
     stopTimers() { calls.timers.push('stop'); },
     feedback: { release() { calls.release.push(true); } }
@@ -313,12 +314,13 @@ for (const kind of ['tutorial', 'history']) {
     h.state.guideAt = 500;
     h.state.guideHidden = true;
     const first = start(h);
-    assert.equal(h.calls.draw.length, 1, 'erase the target hand synchronously on first Down');
+    assert.equal(h.calls.draw.length, 0, 'target touch must not repaint the cube');
+    assert.equal(h.calls.guidance.length, 1, 'erase the target hand synchronously on first Down');
     assert.equal(h.state.guideAt, -1);
     assert.equal(h.state.guideHidden, false);
     const second = point(11, 200, 160);
     h.send(TouchType.Down, [first, second], [second]);
-    assert.equal(h.calls.draw.length, 1, 'additional fingers do not add target redraws');
+    assert.equal(h.calls.guidance.length, 1, 'additional fingers do not add target redraws');
     h.send(TouchType.Up, [first, second], [second]);
     assert.equal(h.state.touching, true, 'a remaining finger must keep target guidance paused');
     assert.equal(h.state.pointerCount, 1);
@@ -326,7 +328,7 @@ for (const kind of ['tutorial', 'history']) {
     assertReleased(h);
     assertNoMove(h);
     assert.equal(h.state.guideAt, -1, 'the next frame must start at the beginning');
-    assert.equal(h.calls.draw.length, 1, 'release leaves restoration to the existing frame timer');
+    assert.equal(h.calls.guidance.length, 1, 'release leaves restoration to the existing frame timer');
   });
 }
 
@@ -599,10 +601,12 @@ test('teaching hint hand is suppressed during multi-finger touch and cancelled c
   h.state.assisted = true;
   const draws = h.calls.draw.length;
   const a = start(h);
-  assert.equal(h.calls.draw.length, draws + 1);
+  assert.equal(h.calls.draw.length, draws);
+  assert.equal(h.calls.guidance.length, 1);
   const b = point(11, 200, 160);
   h.send(TouchType.Down, [a, b], [b]);
-  assert.equal(h.calls.draw.length, draws + 1);
+  assert.equal(h.calls.draw.length, draws);
+  assert.equal(h.calls.guidance.length, 1);
   h.send(TouchType.Up, [a, b], [b]);
   assert.equal(h.state.touching, true);
   h.send(TouchType.Cancel);

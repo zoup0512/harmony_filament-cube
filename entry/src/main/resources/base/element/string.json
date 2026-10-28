@@ -389,6 +389,10 @@
       "value": "目标：六个面各自同色。"
     },
     {
+      "name": "teaching_goal_button",
+      "value": "目标"
+    },
+    {
       "name": "teaching_start_hint",
       "value": "第一次滑动转层开始计时，可自由选择还原路线。"
     },
@@ -447,6 +451,18 @@
     {
       "name": "teaching_previous_save_failed",
       "value": "上次教学进度保存失败。"
+    },
+    {
+      "name": "teaching_goal_summary",
+      "value": "目标：六面同色"
+    },
+    {
+      "name": "teaching_goal_details",
+      "value": "查看本关目标、参考步数与提示规则"
+    },
+    {
+      "name": "teaching_goal_close",
+      "value": "知道了"
     },
     {
       "name": "teaching_hint_note",

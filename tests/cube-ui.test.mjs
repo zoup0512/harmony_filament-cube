@@ -23,6 +23,14 @@ function buttonBlock(key) {
   wired(matches[0], key);
   return matches[0];
 }
+function toolsRow(id) {
+  const game = member('gamePage');
+  const end = game.indexOf(`}.width('100%').id('${id}')`);
+  assert.ok(end >= 0, `${id} row must exist`);
+  const start = game.lastIndexOf('\n        Row(', end);
+  assert.ok(start >= 0, `${id} must identify a top-level tool row`);
+  return game.slice(start, end);
+}
 
 test('ArkUI does not restore face rows, twelve turn buttons, or button-based lesson instructions', () => {
   assert.ok(builders.length > 0, 'must inspect actual ArkUI builders');
@@ -36,6 +44,27 @@ test('ArkUI does not restore face rows, twelve turn buttons, or button-based les
   assert.doesNotMatch(builders, /\bButton\(\s*(?:face|move|label)\b/);
 });
 
+test('guidance uses a separate non-interactive canvas without changing the cube stage layout', () => {
+  const canvas = member('cubeCanvas');
+  const overlay = member('guidanceCanvas');
+  const stage = member('cubeStage');
+  assert.match(canvas, /Canvas\(this\.context2d\)/);
+  assert.match(canvas, /\.id\('cube-base-canvas'\)/);
+  assert.match(overlay, /Canvas\(this\.guidanceContext\)/);
+  assert.match(overlay, /\.id\('cube-guidance-canvas'\)/);
+  assert.match(overlay, /\.hitTestBehavior\(HitTestMode\.None\)/);
+  assert.match(overlay, /\.accessibilityLevel\('no'\)/);
+  for (const block of [canvas, overlay]) {
+    assert.match(block, /\.width\('100%'\)\s*\.height\('100%'\)/);
+    assert.match(block, /\.onDisAppear\(/);
+  }
+  assert.doesNotMatch(overlay, /\.onTouch\(|\.onClick\(|\.position\(|\.offset\(|\.padding\(/);
+  assert.match(stage, /this\.cubeCanvas\(\)\s*this\.guidanceCanvas\(\)/);
+  assert.match(stage, /\}\.width\('100%'\)\.height\('100%'\)/);
+  assert.doesNotMatch(member('frame').split('if (this.activeMove')[0], /this\.draw\(/);
+  assert.doesNotMatch(member('showHint'), /this\.draw\(/);
+});
+
 test('canvas stays gesture-driven; beginner, tutorial and history help describe hands and release', () => {
   const canvas = member('cubeCanvas');
   assert.match(canvas, /Canvas\(this\.context2d\)/);
@@ -45,15 +74,15 @@ test('canvas stays gesture-driven; beginner, tutorial and history help describe 
   assert.match(base.cube_accessibility, /滑动.*松手转动一层.*双指/);
   assert.match(english.cube_accessibility, /Swipe.*release to turn a layer.*two fingers/);
   const game = member('gamePage');
-  wired(game, 'guided_help');
-  wired(game, 'gesture_help');
+  assert.match(member('startGame'), /this\.setHint\('gesture_help'\)/);
+  assert.doesNotMatch(game, /this\.tr\('(?:guided_help|gesture_help)'\)/);
   assert.match(base.gesture_help, /跟随角块上的手势滑动，松手转层/);
   assert.match(base.gesture_help, /中间方块也可滑动/);
   assert.match(base.gesture_help, /空白或双指转视角/);
   assert.match(english.gesture_help, /corners; release to turn.*\nMiddle pieces work too.*two fingers: rotate/);
   assert.equal(base.guided_help, '跟随小手滑动，松手转层\n空白或双指转视角');
   assert.match(english.guided_help, /Follow the hand; release to turn\.\n.*two fingers to rotate/);
-  assert.match(game, /Text\(this\.guideTarget\(\) !== null \? this\.tr\('guided_help'\) :\s*this\.tr\('gesture_help'\)\)/);
+  assert.match(game, /if \(this\.hint\.length > 0 && this\.hintKey !== 'teaching_start_hint'\) \{\s*Text\(this\.hint\)/);
   for (const [name, key] of [['updateLessonHint', 'lesson_step'], ['showHint', 'history_hint'], ['requestMove', 'lesson_follow']]) {
     assert.ok(member(name).includes(`this.${name === 'requestMove' ? 'tr' : 'setHint'}('${key}'`));
     assert.match(base[key], /小手.*滑动.*松手/);
@@ -88,16 +117,18 @@ for (const [key, label, handler] of [
   });
 }
 
-test('game gesture toggle shares the help row with flexible text, not a canvas overlay', () => {
+test('game gesture toggle shares the secondary tool row without permanent help text or a canvas overlay', () => {
   const game = member('gamePage');
-  const help = game.slice(game.indexOf('Text(this.guideTarget()'), game.indexOf('if (this.hint.length > 0)'));
-  assert.match(help, /\.layoutWeight\(1\)/, 'help text must wrap in remaining narrow-screen width');
+  const help = toolsRow('game-secondary-tools');
+  for (const key of ['tutorial', 'reset', 'reset_view']) wired(help, key);
+  assert.doesNotMatch(help, /guided_help|gesture_help|this\.hint/);
   assert.match(help, /Text\(this\.tr\('guides_label'\)\)/);
   assert.match(help, /Toggle\(\{ type: ToggleType\.Switch, isOn: this\.beginnerGuides \}\)\.width\(44\)\.height\(28\)/);
   assert.match(help, /\.selectedColor\(CubeTheme\.green\)\.switchStyle\(\{ unselectedColor: CubeTheme\.line \}\)/);
   assert.match(help, /\.responseRegion\(\{ x: -10, y: -8, width: 64, height: 44 \}\)/,
     'compact switch retains a 44vp touch target without overlapping adjacent controls');
-  assert.match(help, /\.width\(84\)\.constraintSize\(\{ minHeight: 52 \}\)/);
+  assert.match(help, /\.width\(74\)\.constraintSize\(\{ minHeight: 52 \}\)\.padding\(\{ bottom: 8 \}\)/);
+  assert.match(help, /Text\(this\.tr\('guides_label'\)\)[^\n]*\.maxLines\(2\)/);
   assert.doesNotMatch(help, /Button\(this\.tr\('guides_/);
   assert.match(help, /\.accessibilityText\(this\.tr\('guides_accessibility', this\.beginnerGuides \? this\.tr\('on'\) : this\.tr\('off'\)\)\)/);
   for (const key of ['guides_label', 'guides_accessibility', 'on', 'off', 'reset_view']) wired(help, key);
@@ -112,26 +143,86 @@ test('game gesture toggle shares the help row with flexible text, not a canvas o
   assert.doesNotMatch(member('cubeCanvas'), /beginnerGuides|Button\(|Toggle\(/);
 });
 
-test('undo and solve hint sit directly below the cube with prominent touch targets', () => {
+test('game keeps exactly two tool rows with common actions directly below a larger cube', () => {
   const game = member('gamePage');
+  const primary = toolsRow('game-primary-tools');
+  const secondary = toolsRow('game-secondary-tools');
   const cube = game.indexOf('this.cubeStage()');
-  const undo = game.indexOf("Button(this.tr('undo'),");
-  const hint = game.indexOf("Button(this.tr('history_help'),");
-  const help = game.indexOf('Text(this.guideTarget()');
-  assert.ok(cube < undo && undo < hint && hint < help);
-  const cubeLayout = game.slice(cube, undo);
-  assert.doesNotMatch(cubeLayout, /Text\(|Button\(|Column\(/,
-    'no help text or secondary controls may separate the cube from its actions');
-  assert.doesNotMatch(cubeLayout, /this\.hint/,
-    'showing solve guidance must not resize the canvas or shift its action row');
-  for (const key of ['undo', 'history_help']) {
+  assert.ok(cube < game.indexOf(primary) && game.indexOf(primary) < game.indexOf(secondary));
+  assert.ok(game.indexOf(secondary) < game.indexOf("if (this.hint.length > 0 && this.hintKey !== 'teaching_start_hint')"));
+  const cubeLayout = game.slice(cube, game.indexOf(primary));
+  assert.doesNotMatch(cubeLayout, /Text\(|Button\(|Column\(|this\.hint/,
+    'help content must not separate or resize the cube and its tool rows');
+  assert.match(cubeLayout, /this\.viewportHeight - 310\)\)\)/);
+  assert.equal((game.slice(game.indexOf(primary), game.indexOf("if (this.hint.length > 0 && this.hintKey !== 'teaching_start_hint')")).match(/\bRow\(/g) ?? []).length, 2);
+  for (const [row, keys] of [[primary, ['scramble', 'undo', 'history_help']],
+    [secondary, ['tutorial', 'reset', 'reset_view']]]) {
+    let previous = -1;
+    for (const key of keys) {
+      const position = row.indexOf(`Button(this.tr('${key}'),`);
+      assert.ok(position > previous, `${key} must keep its position in its tool row`);
+      previous = position;
+    }
+  }
+  for (const key of ['scramble', 'undo', 'history_help']) {
     const block = buttonBlock(key);
     assert.match(block, /\.layoutWeight\(1\)\.height\(48\)\.borderRadius\(14\)/);
     assert.match(block, /\.fontSize\(14\)\.fontWeight\(FontWeight\.Bold\)/);
     assert.doesNotMatch(block, /Color\.Transparent/);
   }
   assert.match(buttonBlock('undo'), /\.backgroundColor\(CubeTheme\.mint\)\.fontColor\(CubeTheme\.green\)/);
-  assert.match(buttonBlock('history_help'), /\.backgroundColor\(CubeTheme\.ink\)\.fontColor\('#FFFFFF'\)/);
+  assert.match(buttonBlock('history_help'), /\.backgroundColor\(CubeTheme\.mint\)\.fontColor\(CubeTheme\.green\)/);
+});
+
+test('practice and teaching share one viewport-based cube area without a teaching height deduction', () => {
+  const game = member('gamePage');
+  const layout = game.slice(game.indexOf('this.cubeStage()'), game.indexOf(toolsRow('game-primary-tools')));
+  assert.match(layout, /\.width\('100%'\)\.height\(Math\.max\(240, Math\.min\(480,\s*this\.viewportHeight - 310\)\)\)/);
+  assert.doesNotMatch(layout, /challengeIndex|this\.phase|this\.hint/);
+  for (const entry of ['startGame', 'startChallenge']) {
+    assert.match(member(entry), /this\.cubeZoom = 1\.12;/);
+    assert.match(member(entry), /this\.yaw = 0\.62;/);
+    assert.match(member(entry), /this\.pitch = -0\.42;/);
+  }
+  assert.match(game, /Scroll\(this\.gameScroller\)/);
+  assert.match(game, /this\.teachingGoal\(\)/);
+  assert.match(game, /this\.teachingControls\(\)/);
+});
+
+test('teaching goal stays in the compact header instead of adding a card above the cube', () => {
+  const game = member('gamePage');
+  const headerEnd = game.indexOf(".id('game-header')");
+  assert.ok(headerEnd >= 0);
+  const header = game.slice(0, headerEnd);
+  const beforeCube = game.slice(headerEnd, game.indexOf('this.cubeStage()'));
+  assert.match(header, /this\.teachingGoal\(\)/);
+  wired(header, 'teaching_goal_summary');
+  assert.match(header, /\.maxLines\(1\)\.textOverflow\(\{ overflow: TextOverflow\.Ellipsis \}\)/);
+  assert.doesNotMatch(beforeCube, /teachingGoal|teaching_goal|teaching_level_details/);
+  assert.doesNotMatch(member('teachingGoal'), /\b(?:Column|Text)\(|\.padding\(14\)/);
+  assert.match(game, /this\.hintKey !== 'teaching_start_hint'/);
+  for (const strings of [base, english, resourceStrings('en-US')]) {
+    for (const key of ['teaching_goal_summary', 'teaching_goal_details', 'teaching_goal_close']) {
+      assert.equal(typeof strings[key], 'string');
+      assert.ok(strings[key].length > 0);
+    }
+  }
+});
+
+test('compact secondary buttons retain readable wrapping labels and at least 44vp touch targets', () => {
+  for (const key of ['tutorial', 'reset', 'reset_view']) {
+    const block = buttonBlock(key);
+    assert.match(block, /\.layoutWeight\(1\)\.height\((?:44|48)\)/);
+    assert.match(block, /\.padding\(\{ left: 4, right: 4 \}\)/);
+    assert.match(block, /\.labelStyle\(\{ maxLines: 2 \}\)/);
+  }
+  assert.match(buttonBlock('history_help'), /\.labelStyle\(\{ maxLines: 2 \}\)/);
+});
+
+test('tutorial stays secondary while scramble and start challenge retain the primary accent', () => {
+  assert.match(buttonBlock('tutorial'), /\.backgroundColor\(CubeTheme\.soft\)\.fontColor\(CubeTheme\.secondary\)/);
+  assert.match(buttonBlock('scramble'), /\.backgroundColor\(CubeTheme\.accent\)\.fontColor\(CubeTheme\.ink\)/);
+  assert.match(member('homePage'), /Button\(this\.tr\('start_game'\),[^\n]*\n\s*\.backgroundColor\(CubeTheme\.accent\)\.fontColor\(CubeTheme\.ink\)/);
 });
 
 test('game time and move summary stays compact without reducing label legibility', () => {
@@ -270,21 +361,38 @@ test('teaching game shows the real goal and substitutes retry/back controls for 
   const game = member('gamePage');
   const goal = member('teachingGoal');
   wired(game, 'teaching_level');
-  wired(goal, 'teaching_goal');
-  assert.match(goal, /this\.tr\(this\.challenges\[this\.challengeIndex\]\.tipKey\)/);
-  assert.match(goal, /this\.tr\('teaching_level_details', this\.order, this\.challenges\[this\.challengeIndex\]\.referenceMoves\)/);
+  wired(goal, 'teaching_goal_button');
+  assert.match(goal, /Button\(this\.tr\('teaching_goal_button'\), \{ type: ButtonType\.Normal \}\)\.width\(52\)\.height\(44\)/);
+  assert.match(goal, /\.labelStyle\(\{ maxLines: 1 \}\)/);
+  assert.doesNotMatch(goal, /this\.tr\('teaching_goal'\)|maxLines: 2/);
+  assert.equal(base.teaching_goal_button, '目标');
+  for (const strings of [english, resourceStrings('en-US')]) {
+    assert.equal(strings.teaching_goal_button, 'Goal');
+  }
+  assert.match(goal, /\.accessibilityText\(this\.tr\('teaching_goal_details'\)\)/);
+  assert.match(goal, /\.onClick\(\(\) => this\.showTeachingGoal\(\)\)/);
+  const details = member('showTeachingGoal');
+  for (const key of ['teaching_goal_summary', 'teaching_level_details', 'teaching_start_hint', 'teaching_hint_note', 'teaching_goal_close']) wired(details, key);
+  assert.match(details, /this\.getUIContext\(\)\.showAlertDialog\(/);
+  assert.match(details, /this\.tr\(challenge\.tipKey\)/);
+  assert.match(details, /this\.tr\('teaching_level_details', this\.order, challenge\.referenceMoves\)/);
   assert.match(game, /if \(this\.challengeIndex >= 0\) \{\s*this\.teachingGoal\(\)/);
-  assert.match(game, /if \(this\.challengeIndex >= 0\) \{\s*this\.teachingControls\(\)\s*\} else \{/);
-  const legacy = game.slice(game.indexOf('this.teachingControls()'), game.indexOf("}.width('100%').padding(14)"));
-  for (const key of ['scramble', 'tutorial', 'reset']) wired(legacy, key);
+  const primary = toolsRow('game-primary-tools');
+  const secondary = toolsRow('game-secondary-tools');
+  assert.match(primary, /if \(this\.challengeIndex >= 0\) \{\s*Button\(this\.tr\('teaching_retry'\)/);
+  assert.match(primary, /\} else \{\s*Button\(this\.tr\('scramble'\)/);
+  assert.match(secondary, /if \(this\.challengeIndex >= 0\) \{\s*Button\(this\.tr\('teaching_back'\)/);
+  assert.match(secondary, /\} else \{\s*Button\(this\.tr\('tutorial'\)/);
+  wired(secondary, 'reset');
+  assert.match(buttonBlock('teaching_retry'), /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.retryChallenge\(\)\)/);
+  assert.match(buttonBlock('teaching_back'), /\.onClick\(\(\) => this\.goHome\(\)\)/);
   const controls = member('teachingControls');
-  assert.doesNotMatch(controls, /doScramble|scramble\(\)|startLesson|doLesson|confirmReset|resetStepByStep/);
-  for (const key of ['teaching_retry', 'teaching_back', 'teaching_hint_note']) wired(controls, key);
+  assert.doesNotMatch(controls, /doScramble|scramble\(\)|startLesson|doLesson|confirmReset|resetStepByStep|retryChallenge|goHome/);
+  assert.doesNotMatch(controls, /teaching_hint_note/);
+  assert.match(game, /if \(this\.challengeIndex >= 0 && this\.phase === 'solved'\) \{\s*Column\(\) \{\s*this\.teachingControls\(\)/);
   assert.match(controls, /if \(this\.phase === 'solved'\) \{[\s\S]*?this\.assisted \? 'teaching_passed_guided' : 'teaching_passed'/);
   assert.match(controls, /this\.challengeIndex === this\.challenges\.length - 1 \? 'teaching_back' : 'teaching_next'/);
   assert.match(controls, /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.nextChallenge\(\)\)/);
-  assert.match(controls, /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.retryChallenge\(\)\)/);
-  assert.match(controls, /\.onClick\(\(\) => this\.goHome\(\)\)/);
   assert.match(member('backButton'), /this\.challengeIndex >= 0 \? 'teaching_back' : 'return_home'/);
   assert.match(member('showHint'), /this\.setHint\('teaching_history_hint', this\.moveLabel\(solution\[0\]\)\)/);
   assert.doesNotMatch(member('statsPage'), /teachingRecords/);

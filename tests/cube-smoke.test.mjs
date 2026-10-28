@@ -15,10 +15,19 @@ const page = readFileSync(new URL('../entry/src/main/ets/pages/Index.ets', impor
 const start = smoke.indexOf('const ROOT =');
 const end = smoke.indexOf("\nif (process.argv.includes('--check-gestures'))");
 assert.ok(start >= 0 && end > start, 'smoke entry boundary must be explicit');
+const repeatedHintCase = smoke.match(/  await runCase\('hint-repeat-stability', async \(\) => \{[\s\S]*?\n  \}\);/)?.[0];
+assert.ok(repeatedHintCase, 'the actual repeated-hint case must remain available for regression tests');
 function smokeHarness(locale) {
   return new Script(`${smoke.slice(start, end).replaceAll('import.meta.url', JSON.stringify(smokeUrl.href))}
     ({ lesson, observedText, resourcePattern, flatten, matches, isHome, isGame, button,
-      enabledButton, moves, timer, orderSelected, leaveDialogReady, dialogAction, metric,
+      enabledButton, moves, timer, orderSelected, leaveDialogReady, dialogAction, metric, gameCanvas, idleControls,
+      runRepeatedHints: async hooks => {
+        const { game, swipeFace, dump, tap, tapNode, capture, check } = hooks;
+        const runCase = async (_name, run) => run();
+        let latest;
+        const waitFor = async (...args) => { latest = await hooks.waitFor(...args); return latest; };
+        ${repeatedHintCase}
+      },
       SMOKE_LOCALE, RESOURCE_LOCALE, summary, regex: pattern => new RegExp(pattern) });`).runInNewContext({
     readFileSync, resolve, dirname, join, fileURLToPath,
     process: { env: locale === undefined ? {} : { SMOKE_LOCALE: locale }, pid: 1 },
@@ -46,6 +55,102 @@ function layout(api, children) {
 }
 const element = (text, type = 'Text', extra = {}, children = []) => ({
   attributes: { text, type, bounds: '[10,10][900,100]', enabled: true, ...extra }, children
+});
+
+test('device gestures target the base canvas, never the transparent guidance overlay', () => {
+  const api = smokeHarness('zh-CN');
+  const state = layout(api, [
+    element('', 'Canvas', { id: 'cube-guidance-canvas' }),
+    element('', 'Canvas', { id: 'cube-base-canvas' })
+  ]);
+  assert.equal(api.gameCanvas(state)?.a.id, 'cube-base-canvas');
+  assert.equal(api.gameCanvas(layout(api, [element('', 'Canvas', { id: 'cube-guidance-canvas' })])), undefined);
+});
+
+test('device idle checks distinguish offscreen controls from disabled animation controls', () => {
+  const api = smokeHarness('zh-CN');
+  const controls = enabled => layout(api, [
+    element('', 'Canvas', { id: 'cube-base-canvas' }),
+    element('打乱', 'Button', { bounds: '[0,1100][400,1200]', enabled }),
+    element('教程', 'Button', { bounds: '[400,1100][900,1200]', enabled })
+  ]);
+  assert.equal(api.idleControls(controls(true)), true, 'offscreen is not busy');
+  assert.equal(api.idleControls(controls(false)), false, 'disabled controls still identify animation');
+  assert.equal(api.enabledButton(controls(true), '教程'), false, 'offscreen buttons must not be tappable');
+  const omitted = layout(api, [
+    element('', 'Canvas', { id: 'cube-base-canvas' }),
+    element('正视角', 'Button'),
+    element(formatResource(resourceStrings().lesson_step, [1, 5, 'D']))
+  ]);
+  assert.equal(api.idleControls(omitted), true, 'UI Test may omit bottom controls after tutorial setup');
+  omitted.nodes.pop();
+  assert.equal(api.idleControls(omitted), false, 'view control alone cannot prove animation is finished');
+});
+
+test('device suite retains repeated-hint, overlay alignment and undo checks', () => {
+  assert.match(smoke, /runCase\('hint-repeat-stability'/);
+  assert.match(smoke, /i < 12/);
+  assert.match(smoke, /independent guidance canvas exactly overlays the cube/);
+  assert.match(smoke, /undo after repeated hints/);
+});
+
+test('repeated hints use the first visible hint layout but still reject movement, resizing and overlay drift', async () => {
+  const api = smokeHarness('zh-CN');
+  const initialBounds = '[54,578][1026,1862]';
+  const hintedBounds = '[54,568][1026,1852]';
+  async function run(finalBounds = hintedBounds, overlayBounds = finalBounds) {
+    let hinted = false;
+    let undone = false;
+    let repeats = 0;
+    const captures = [];
+    const checks = [];
+    const hintText = formatResource(resourceStrings().history_hint, ["U'"]);
+    const dump = () => {
+      const canvasBounds = !hinted ? initialBounds : repeats ? finalBounds : hintedBounds;
+      const tree = { attributes: { bounds: '[0,0][1080,2406]', type: 'Root', enabled: true }, children: [
+        element('', 'Canvas', { id: 'cube-base-canvas', bounds: canvasBounds }),
+        element('', 'Canvas', { id: 'cube-guidance-canvas', bounds: repeats ? overlayBounds : canvasBounds }),
+        element('', 'Column', {}, [element('用时'), element('00:00.00')]),
+        element('', 'Column', {}, [element('步数'), element(undone ? '0' : '1')]),
+        ...['打乱', '教程', '还原提示', '↶ 撤销'].map(text => element(text, 'Button')),
+        ...(hinted && !undone ? [element(hintText)] : [])
+      ] };
+      return { tree, nodes: api.flatten(tree), viewport: { left: 0, top: 0, right: 1080, bottom: 2406 } };
+    };
+    await api.runRepeatedHints({
+      game: async order => assert.equal(order, 3),
+      swipeFace: async face => assert.equal(face, 'U'),
+      dump,
+      tap: async query => {
+        if (String(query).includes('撤销')) undone = true;
+        else { assert.equal(query, '还原提示'); hinted = true; }
+      },
+      tapNode: node => { assert.equal(node.text, '还原提示'); repeats++; },
+      waitFor: async (description, predicate, _timeout, samples = 1) => {
+        let state;
+        for (let i = 0; i < samples; i++) {
+          state = dump();
+          assert.ok(predicate(state), description);
+        }
+        return state;
+      },
+      capture: async label => {
+        const state = dump();
+        captures.push({ label, bounds: api.gameCanvas(state).a.bounds });
+        return state;
+      },
+      check: (condition, description) => { assert.ok(condition, description); checks.push(description); }
+    });
+    assert.equal(repeats, 12);
+    assert.equal(undone, true);
+    assert.deepEqual(captures[0], { label: 'repeat-hint-before', bounds: hintedBounds });
+    assert.ok(checks.includes('repeated hints do not shift or resize the cube'));
+    assert.ok(checks.includes('independent guidance canvas exactly overlays the cube'));
+  }
+  await run();
+  await assert.rejects(run(initialBounds), /repeated hints do not shift or resize the cube/);
+  await assert.rejects(run('[54,568][1026,1853]'), /repeated hints do not shift or resize the cube/);
+  await assert.rejects(run(hintedBounds, initialBounds), /independent guidance canvas exactly overlays the cube/);
 });
 
 for (const locale of ['zh-CN', 'en', 'en-US', 'en-GB']) {
