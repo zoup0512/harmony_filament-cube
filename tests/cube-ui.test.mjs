@@ -5,6 +5,8 @@ import { productionMember, resourceStrings } from './resource-helper.mjs';
 
 // Source-level ArkUI regression checks, not a substitute for on-device UI tests.
 const source = readFileSync(new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url), 'utf8');
+const resultSource = readFileSync(new URL('../entry/src/main/ets/pages/SolveResultDialog.ets', import.meta.url), 'utf8');
+const resultMember = name => productionMember(resultSource, name);
 const base = resourceStrings();
 const english = resourceStrings('en');
 const member = name => productionMember(source, name);
@@ -409,6 +411,48 @@ test('teaching copy explains free routes, quarter-turn references, guidance and 
   assert.match(english.teaching_history_hint, /hand.*swipe.*release.*solved with hints/);
   assert.match(base.teaching_save_failed, /本关已完成.*未能保存/);
   assert.match(english.teaching_save_failed, /Level complete, but.*could not be saved/);
+});
+
+test('solve result uses a native centered modal and an observed per-session snapshot, not a page overlay', () => {
+  const model = readFileSync(new URL('../entry/src/main/ets/model/SolveResult.ets', import.meta.url), 'utf8');
+  assert.match(model, /@Observed\s+export class SolveResult/);
+  assert.match(source, /@State private solveResult: SolveResult = new SolveResult\(\)/);
+  assert.match(resultSource, /@CustomDialog\s+export struct SolveResultDialog/);
+  assert.match(resultSource, /@ObjectLink result: SolveResult/);
+  const show = member('showSolveResult');
+  assert.match(show, /new CustomDialogController\(\{/);
+  assert.match(show, /builder: SolveResultDialog\(\{\s*result: this\.solveResult,/);
+  assert.match(show, /alignment: DialogAlignment\.Center/);
+  assert.match(show, /isModal: true/);
+  assert.match(show, /autoCancel: true/);
+  assert.match(show, /DismissReason\.PRESS_BACK \|\| action\.reason === DismissReason\.TOUCH_OUTSIDE/);
+  assert.match(show, /this\.closeSolveResult\(savedSession\);\s*action\.dismiss\(\)/);
+  assert.doesNotMatch(member('build') + member('gamePage'), /SolveResultDialog|resultVisible/,
+    'the native controller owns the modal layer, not the game Scroll or page Stack');
+  assert.doesNotMatch(resultSource, /CubeModel|CubeStore|requestMove|finishSolve|resetSession/);
+});
+
+test('result contains only a scrollable success title, size/level metadata and dark time/move card', () => {
+  const build = resultMember('build');
+  const ids = [...resultSource.matchAll(/\.id\('([^']+)'\)/g)].map(match => match[1]);
+  assert.deepEqual(ids.toSorted(), ['dialog', 'title', 'time', 'moves'].map(id => `solve-result-${id}`).toSorted());
+  assert.match(build, /build\(\) \{\s*Scroll\(\) \{/);
+  assert.equal((build.match(/\bScroll\(/g) ?? []).length, 1);
+  assert.match(build, /\.width\('calc\(100% - 40vp\)'\)/);
+  assert.match(build, /maxWidth: 400, maxHeight: Math\.max\(120, this\.viewportHeight - 80\)/);
+  assert.match(build, /\.backgroundColor\(CubeTheme\.surface\)\.borderRadius\(28\)/);
+  assert.match(build, /\.padding\(18\)\.backgroundColor\(CubeTheme\.ink\)\.borderRadius\(20\)/);
+  assert.match(build, /Text\(this\.result\.challengeIndex < 0 \? \$r\('app\.string\.result_solved'\) :\s*\(this\.result\.assisted \? \$r\('app\.string\.teaching_passed_guided'\) : \$r\('app\.string\.teaching_passed'\)\)\)/);
+  assert.match(build, /\$r\('app\.string\.cube_title', this\.result\.order\)/);
+  assert.match(build, /\$r\('app\.string\.teaching_level', this\.result\.challengeIndex \+ 1\)/);
+  assert.match(build, /Text\(this\.formatTime\(this\.result\.durationMs\)\)\.fontFamily\('monospace'\)\.fontSize\(36\)/);
+  assert.match(build, /\.minFontSize\(22\)\.maxFontSize\(36\)\.maxLines\(1\)/);
+  assert.match(build, /Text\(`\$\{this\.result\.moves\}`\)/);
+  assert.equal((build.match(/\bText\(/g) ?? []).length, 7, 'no additional labels or explanations');
+  assert.doesNotMatch(resultSource, /\b(?:Button|SymbolGlyph|Circle)\(|\.shadow\(|onClose|onContinue|saveState|newRecord|saveMessage|statusText|teaching_completed_note/);
+  assert.doesNotMatch(member('showSolveResult'), /setTimeout|setInterval|await/);
+  assert.match(member('gamePage'), /if \(this\.challengeIndex >= 0 && this\.phase === 'solved'\) \{\s*Column\(\) \{\s*this\.teachingControls\(\)/,
+    'existing teaching feedback remains on the page after dismissal');
 });
 
 test('game Scroll resets its position on mount and on same-page challenge changes', () => {

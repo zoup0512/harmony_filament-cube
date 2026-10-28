@@ -7,6 +7,11 @@ import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
 import { resourceManager } from './resource-helper.mjs';
 import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
 
+const resultSource = readFileSync(new URL('../entry/src/main/ets/model/SolveResult.ets', import.meta.url), 'utf8');
+const { SolveResult } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(
+  resultSource.replace(/^@Observed\r?\n/m, '')
+)).toString('base64')}`);
+
 const sourceUrl = new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url);
 const source = readFileSync(sourceUrl, 'utf8');
 // Execute production methods AND field initializers, not a parallel state machine.
@@ -19,7 +24,8 @@ function member(name) {
 const names = ['touch', 'invalidateGesture', 'layerGestureCurrent', 'setTouchOrigin',
   'moveOrbit', 'judgeScrollGesture', 'animate', 'resetSession', 'onForegroundChanged',
   'undo', 'aboutToDisappear', 'guideTarget', 'resetGuide', 'clearGuidance', 'tr', 'setHint', 'toast',
-  'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge', 'leavePage', 'goHome'];
+  'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge', 'leavePage', 'goHome',
+  'closeSolveResult'];
 const fields = source.match(/^struct Index \{\r?\n([\s\S]*?)(?=^  aboutToAppear\()/m);
 assert.ok(fields, 'production field defaults must be extractable');
 const declarations = fields[1].replace(/@\w+(?:\([^\r\n)]*\))?\s*/g, '');
@@ -28,7 +34,7 @@ const TouchType = Object.freeze({ Down: 0, Up: 1, Move: 2, Cancel: 3 });
 const GestureJudgeResult = Object.freeze({ CONTINUE: 0, REJECT: 1 });
 const GestureControl = Object.freeze({ GestureType: { PAN_GESTURE: 2, TAP_GESTURE: 0 } });
 const TouchHarness = runInNewContext(executable, {
-  TouchType, GestureJudgeResult, GestureControl, CubeModel, TeachingChallenge, createTeachingChallenges,
+  TouchType, GestureJudgeResult, GestureControl, CubeModel, SolveResult, TeachingChallenge, createTeachingChallenges,
   CubeRenderer: class {}, CubeStore: class {}, CubeFeedback: class {},
   CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
   Scroller: class { scrollTo() {} }
@@ -397,6 +403,38 @@ for (const [name, mutate] of [
     assertReleased(h);
   });
 }
+for (const hit of [true, false]) {
+  test(`visible result blocks ${hit ? 'layer picking' : 'orbit'} and stale release cannot leak through close`, () => {
+    const h = harness({ hit });
+    start(h);
+    assert.equal(h.state.touching, true);
+    // Only the native modal visibility boundary is injected here; game tests
+    // drive real completion/opening, and all touch/close methods remain real.
+    h.state.solveResult = new SolveResult(h.state.sessionId);
+    h.state.resultVisible = true;
+    let closed = 0;
+    h.state.resultDialog = { close() { closed++; } };
+    h.send(TouchType.Move, [point(42, 180, 140)]);
+    up(h);
+    start(h);
+    up(h);
+    assertReleased(h);
+    assertNoMove(h);
+    assertView(h);
+    assert.equal(h.calls.draw.length, 0);
+    h.state.closeSolveResult();
+    assert.equal(closed, 1);
+    h.send(TouchType.Move, [point(42, 190, 160)]);
+    up(h);
+    assertNoMove(h);
+    assertView(h);
+    start(h);
+    up(h);
+    if (hit) assert.equal(h.calls.requestMove.length, 1, 'fresh Down recovers layer input');
+    else assert.notEqual(h.state.yaw, 0.62, 'fresh Down recovers view inspection');
+  });
+}
+
 test('real reset invalidates pending layer and orphan Move', () => {
   const h = harness();
   start(h);

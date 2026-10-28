@@ -137,6 +137,10 @@
       "value": "还原成功，但本地成绩保存失败。"
     },
     {
+      "name": "result_solved",
+      "value": "还原成功!"
+    },
+    {
       "name": "previous_save_failed",
       "value": "上局成绩保存失败。"
     },
@@ -430,11 +434,11 @@
     },
     {
       "name": "teaching_passed",
-      "value": "独立通关！"
+      "value": "独立通关!"
     },
     {
       "name": "teaching_passed_guided",
-      "value": "提示通关！"
+      "value": "提示通关!"
     },
     {
       "name": "teaching_saving",

@@ -7,6 +7,11 @@ import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
 import { resourceManager } from './resource-helper.mjs';
 import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
 
+const resultSource = readFileSync(new URL('../entry/src/main/ets/model/SolveResult.ets', import.meta.url), 'utf8');
+const { SolveResult } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(
+  resultSource.replace(/^@Observed\r?\n/m, '')
+)).toString('base64')}`);
+
 // Run with Node 24: node --test tests/cube-game.test.mjs
 // Extract production members verbatim, not a second implementation of the game.
 // The member-indent boundary is intentional (as in cube-touch.test.mjs): source
@@ -24,7 +29,8 @@ const names = [
   'touch', 'layerGestureCurrent', 'setTouchOrigin', 'moveOrbit',
   'tr', 'setHint', 'onLanguageChanged', 'formatTime', 'bestTime', 'orderSolves',
   'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge',
-  'teachingStatus', 'teachingBest', 'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startLesson', 'showTeachingGoal'
+  'teachingStatus', 'teachingBest', 'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startLesson', 'showTeachingGoal',
+  'showSolveResult', 'closeSolveResult', 'aboutToDisappear'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
@@ -70,6 +76,9 @@ const executable = stripTypeScriptTypes([
 const script = new Script(executable, { filename: pageUrl.pathname });
 
 const TouchType = Object.freeze({ Down: 0, Up: 1, Move: 2, Cancel: 3 });
+const DialogAlignment = Object.freeze({ Center: 'center' });
+const Curve = Object.freeze({ EaseOut: 'ease-out', EaseIn: 'ease-in' });
+const DismissReason = Object.freeze({ PRESS_BACK: 0, TOUCH_OUTSIDE: 1 });
 
 function seededRandom() {
   let seed = 123456789;
@@ -82,7 +91,8 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   const timers = new Map();
   const calls = {
     draw: [], getSwipeGuide: [], drawGuide: [], drawBeginnerGuides: [],
-    feedback: [], records: [], teachingRecords: [], pending: [], toasts: [], settings: [], dialogs: [], scroll: []
+    feedback: [], records: [], teachingRecords: [], pending: [], toasts: [], settings: [], dialogs: [], scroll: [],
+    resultDialogs: [], release: []
   };
   const guide = guideVisible ? { startX: 100, startY: 120, endX: 150, endY: 140 } : null;
   class FakeDate extends Date {
@@ -118,8 +128,25 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
     }
   }
   const GameHarness = script.runInNewContext({
-    CubeModel, CubeMove, TeachingChallenge, createTeachingChallenges,
-    TouchType, Date: FakeDate, CubeStore: MockStore,
+    CubeModel, CubeMove, SolveResult, TeachingChallenge, createTeachingChallenges,
+    TouchType, DialogAlignment, Curve, DismissReason, Date: FakeDate, CubeStore: MockStore,
+    // Preserve the production options, linked result and callbacks; do not model
+    // game transitions here. ArkUI layout itself is checked in cube-ui.test.mjs.
+    SolveResultDialog: props => props,
+    CustomDialogController: class {
+      opens = 0;
+      closes = 0;
+      constructor(options) { this.options = options; calls.resultDialogs.push(this); }
+      open() {
+        this.opens++;
+        this.atOpen = {
+          phase: state.phase, busy: state.busy, solved: state.model.isSolved(), elapsed: state.elapsed,
+          moves: state.moves, activeMove: state.activeMove, touching: state.touching,
+          lastDraw: calls.draw.at(-1), saves: calls.pending.length
+        };
+      }
+      close() { this.closes++; }
+    },
     CubeRenderer: class {
       draw(...args) { calls.draw.push(args); }
       getSwipeGuide(...args) { calls.getSwipeGuide.push(args); return guide; }
@@ -131,6 +158,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
     CubeFeedback: class {
       play(...args) { calls.feedback.push(args); }
       async prepare() {}
+      release() { calls.release.push(true); }
     },
     CanvasRenderingContext2D: class {
       clears = [];
@@ -281,6 +309,24 @@ test('teaching goal details ignore normal games, invalid levels and background r
 });
 
 function snapshot(model) { return JSON.stringify(model.cubies); }
+
+function assertResult(h) {
+  const s = h.state;
+  assert.ok(s.solveResult instanceof SolveResult, 'use the production result value object');
+  assert.deepEqual({ ...s.solveResult }, {
+    sessionId: s.sessionId, order: s.order, durationMs: s.elapsed, moves: s.moves,
+    challengeIndex: s.challengeIndex, assisted: s.assisted
+  });
+  const dialog = h.calls.resultDialogs.at(-1);
+  assert.ok(dialog, 'a real production call must create the controller');
+  assert.equal(s.resultDialog, dialog);
+  assert.equal(s.resultVisible, true);
+  assert.equal(dialog.opens, 1);
+  assert.equal(dialog.closes, 0);
+  assert.equal(dialog.options.builder.result, s.solveResult, 'the dialog links to the same snapshot');
+  assert.equal(dialog.options.builder.viewportHeight, s.viewportHeight);
+  return dialog;
+}
 
 function completeMove(h, milliseconds = 220 / h.state.speed) {
   assert.equal(h.state.busy, true, 'test must have a real pending animation');
@@ -477,6 +523,7 @@ for (const order of [2, 3, 4, 5]) {
       assert.equal(s.queueKind, '');
       assert.equal(s.hint, '');
       assert.equal(s.assisted, false);
+      assert.equal(calls.resultDialogs.length, 0, 'automated reset is not a completed timed solve');
     });
   }
 }
@@ -654,16 +701,18 @@ for (const [order, count] of [[2, 11], [3, 25], [4, 45], [5, 65]]) {
     assert.match(s.hint, /第一手开始计时/);
   });
 
-  test(`${order}x${order}: an actual inverse solves and saves exactly one real record`, async t => {
-    const h = harness(t, { order });
+  test(`${order}x${order}: an actual inverse opens one frozen result after the final draw and saves once`, async t => {
+    const h = harness(t, { order, canvasReady: true });
     const { inverse, initial } = oneMoveAway(h);
     const { state: s, calls, clock } = h;
+    s.startTimers();
     clock.advance(8000); // Ready waiting time is excluded.
     s.requestMove(inverse);
     clock.advance(219);
     s.frame();
     assert.equal(s.model.isSolved(), false);
     assert.equal(calls.records.length, 0);
+    assert.equal(calls.resultDialogs.length, 0, 'never show a result for a partial final turn');
     clock.advance(1);
     s.frame();
     assert.equal(snapshot(s.model), initial);
@@ -671,6 +720,12 @@ for (const [order, count] of [[2, 11], [3, 25], [4, 45], [5, 65]]) {
     assert.equal(s.phase, 'solved');
     assert.equal(s.moves, 1);
     assert.equal(s.elapsed, 220);
+    const dialog = assertResult(h);
+    assert.deepEqual(dialog.atOpen, {
+      phase: 'solved', busy: false, solved: true, elapsed: 220, moves: 1,
+      activeMove: null, touching: false, saves: 0,
+      lastDraw: [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.yaw, s.pitch, null, 0, s.cubeZoom]
+    }, 'open only after committing, freezing time and drawing the solved cube, before waiting on storage');
     assert.equal(calls.records.length, 1);
     assert.deepEqual({ ...calls.records[0] }, { order, durationMs: 220, moves: 1, date: clock.now() });
     assert.match(s.hint, /正在保存/);
@@ -680,32 +735,249 @@ for (const [order, count] of [[2, 11], [3, 25], [4, 45], [5, 65]]) {
     assert.equal(s.records[0], calls.records[0]);
     assert.notEqual(s.records, s.store.records, 'UI receives a copy of the record list');
     assert.match(s.hint, /成绩已记录/);
+    assert.equal(assertResult(h), dialog, 'save leaves the frozen result unchanged');
     clock.advance(1000);
+    clock.fire(s.clockTimer);
     s.frame();
+    s.finishSolve();
+    s.showSolveResult();
+    assert.equal(calls.resultDialogs.length, 1, 'frame and repeated completion never open another dialog');
     assert.equal(calls.records.length, 1);
     assert.equal(s.elapsed, 220);
+    assert.equal(s.solveResult.durationMs, 220);
   });
 }
 
-test('showHint marks the actual solve assisted and never writes a record', t => {
+for (const order of [2, 3, 4, 5]) {
+  test(`${order}x${order}: assisted completion shows the frozen result without saving`, t => {
+    const h = harness(t, { order });
+    const { inverse, initial } = oneMoveAway(h);
+    const { state: s } = h;
+    const before = snapshot(s.model);
+    s.showHint();
+    assert.equal(s.assisted, true);
+    assert.match(s.hint, /还原建议：R'/);
+    assert.match(s.hint, /不计入成绩/);
+    assert.equal(snapshot(s.model), before);
+    s.requestMove(inverse);
+    completeMove(h);
+    assert.equal(snapshot(s.model), initial);
+    assert.equal(s.phase, 'solved');
+    assert.equal(s.moves, 1);
+    assert.equal(s.elapsed, 220);
+    assert.match(s.hint, /不记录成绩/);
+    assertResult(h);
+    assert.equal(h.calls.resultDialogs.length, 1);
+    assert.equal(h.calls.pending.length, 0);
+    assert.equal(h.calls.records.length, 0);
+    assert.equal(s.records.length, 0);
+  });
+}
+
+function solveOrdinary(h, durationMs = 220) {
+  const { inverse } = oneMoveAway(h);
+  h.state.requestMove(inverse);
+  completeMove(h, durationMs);
+  assert.equal(h.state.phase, 'solved');
+  return assertResult(h);
+}
+
+function dismissResult(dialog, reason = DismissReason.TOUCH_OUTSIDE) {
+  let dismissals = 0;
+  dialog.options.onWillDismiss({ reason, dismiss: () => dismissals++ });
+  assert.equal(dismissals, 1);
+}
+
+test('native result is modal, blocks moves and touch, and closing preserves the completed attempt', t => {
   const h = harness(t);
-  const { inverse, initial } = oneMoveAway(h);
-  const { state: s } = h;
+  const { state: s, calls, clock } = h;
+  assert.equal(s.solveResult.sessionId, -1);
+  assert.equal(s.resultVisible, false);
+  assert.equal(s.resultDialog, null);
+  s.startTimers();
+  const dialog = solveOrdinary(h);
+  const result = s.solveResult;
   const before = snapshot(s.model);
-  s.showHint();
-  assert.equal(s.assisted, true);
-  assert.match(s.hint, /还原建议：R'/);
-  assert.match(s.hint, /不计入成绩/);
+  assert.equal(dialog.options.alignment, DialogAlignment.Center);
+  assert.equal(dialog.options.isModal, true);
+  assert.equal(dialog.options.autoCancel, true);
+  assert.equal(dialog.options.customStyle, true);
+  s.requestMove(s.faceMove('U'));
+  touch(h, TouchType.Down);
+  touch(h, TouchType.Move, 160, 140);
+  touch(h, TouchType.Up, 160, 140);
+  assert.equal(s.touching, false);
+  assert.equal(s.busy, false);
+  assert.equal(s.activeMove, null);
+  assert.equal(s.yaw, 0.62);
+  assert.equal(s.pitch, -0.42);
   assert.equal(snapshot(s.model), before);
-  s.requestMove(inverse);
-  completeMove(h);
-  assert.equal(snapshot(s.model), initial);
   assert.equal(s.phase, 'solved');
   assert.equal(s.moves, 1);
+  clock.advance(5000);
+  clock.fire(s.clockTimer);
   assert.equal(s.elapsed, 220);
-  assert.match(s.hint, /不记录成绩/);
-  assert.equal(h.calls.records.length, 0);
-  assert.equal(s.records.length, 0);
+  dismissResult(dialog);
+  dismissResult(dialog);
+  assert.equal(dialog.closes, 1, 'close is idempotent');
+  assert.equal(s.resultVisible, false);
+  assert.equal(s.resultDialog, null);
+  assert.equal(s.solveResult, result);
+  assert.equal(s.sessionId, result.sessionId);
+  assert.equal(s.page, 'game');
+  assert.equal(s.phase, 'solved');
+  assert.equal(s.elapsed, result.durationMs);
+  assert.equal(s.moves, result.moves);
+  assert.equal(snapshot(s.model), before);
+  s.requestMove(s.faceMove('U'));
+  completeMove(h);
+  assert.equal(s.phase, 'idle');
+  assert.equal(s.elapsed, 0);
+  assert.equal(result.durationMs, 220, 'the displayed result is a snapshot, not live game counters');
+  assert.equal(result.moves, 1);
+  assert.equal(calls.resultDialogs.length, 1);
+});
+
+for (const success of [true, false]) {
+  test(`closed result receives save ${success ? 'success' : 'failure'} without reopening on callbacks or resume`, async t => {
+    const h = harness(t);
+    const { state: s, calls, clock } = h;
+    const dialog = solveOrdinary(h);
+    const result = s.solveResult;
+    const frozen = { ...result };
+    dismissResult(dialog);
+    s.foreground = false;
+    s.onForegroundChanged();
+    await settle(h, 0, success);
+    assert.deepEqual({ ...result }, frozen, 'storage completion never changes the result snapshot');
+    s.foreground = true;
+    s.onForegroundChanged();
+    clock.advance(5000);
+    clock.fire(s.clockTimer);
+    s.frame();
+    s.finishSolve();
+    s.showSolveResult();
+    assert.equal(s.solveResult, result);
+    assert.equal(s.resultVisible, false);
+    assert.equal(s.resultDialog, null);
+    assert.equal(s.phase, 'solved');
+    assert.equal(s.sessionId, result.sessionId);
+    assert.equal(s.elapsed, 220);
+    assert.equal(calls.resultDialogs.length, 1);
+    assert.equal(dialog.closes, 1);
+  });
+}
+
+test('page Back and native Back each close only the result before normal navigation resumes', t => {
+  for (const native of [false, true]) {
+    const h = harness(t);
+    enterTeaching(h);
+    solveTeaching(h);
+    const { state: s, calls } = h;
+    const dialog = assertResult(h);
+    const before = snapshot(s.model);
+    const session = s.sessionId;
+    if (native) {
+      let dismissed = 0;
+      dialog.options.onWillDismiss({ reason: DismissReason.PRESS_BACK, dismiss: () => dismissed++ });
+      assert.equal(dismissed, 1);
+    } else {
+      assert.equal(s.onBackPress(), true);
+    }
+    assert.equal(s.resultVisible, false);
+    assert.equal(dialog.closes, 1);
+    assert.equal(s.sessionId, session);
+    assert.equal(s.page, 'game');
+    assert.equal(s.phase, 'solved');
+    assert.equal(s.challengeIndex, 0);
+    assert.equal(snapshot(s.model), before);
+    assert.equal(calls.dialogs.length, 0, 'Back must not also open a leave confirmation');
+    s.showSolveResult();
+    assert.equal(calls.resultDialogs.length, 1);
+    assert.equal(s.onBackPress(), true);
+    assert.equal(s.page, 'teaching', 'a later Back keeps the existing navigation hierarchy');
+  }
+});
+
+for (const cleanup of ['resetSession', 'aboutToDisappear']) {
+  test(`${cleanup} releases the result without reopening after saving`, async t => {
+    const h = harness(t);
+    const { state: s, calls, clock } = h;
+    s.startTimers();
+    const dialog = solveOrdinary(h);
+    s[cleanup]();
+    const board = snapshot(s.model);
+    const session = s.sessionId;
+    assert.equal(s.resultVisible, false);
+    assert.equal(s.resultDialog, null);
+    assert.equal(dialog.closes, 1);
+    assert.equal(s.touching, false);
+    if (cleanup === 'aboutToDisappear') {
+      assert.equal(clock.timers.size, 0);
+      assert.equal(calls.release.length, 1);
+    } else {
+      assert.equal(s.phase, 'idle');
+      assert.equal(s.moves, 0);
+      assert.equal(s.elapsed, 0);
+    }
+    await settle(h);
+    s.showSolveResult();
+    assert.equal(s.sessionId, session);
+    assert.equal(snapshot(s.model), board);
+    assert.equal(s.resultVisible, false);
+    assert.equal(calls.resultDialogs.length, 1);
+  });
+}
+
+test('old native dismissal callbacks cannot dismiss or restart a newer result', async t => {
+  const h = harness(t);
+  const { state: s, calls } = h;
+  const old = solveOrdinary(h);
+  s.resetSession();
+  const current = solveOrdinary(h);
+  const result = s.solveResult;
+  const board = snapshot(s.model);
+  dismissResult(old);
+  dismissResult(old, DismissReason.PRESS_BACK);
+  assert.equal(s.solveResult, result);
+  assert.equal(s.resultDialog, current);
+  assert.equal(s.resultVisible, true);
+  assert.equal(current.closes, 0);
+  assert.equal(s.sessionId, result.sessionId);
+  assert.equal(snapshot(s.model), board);
+  await settle(h, 0);
+  assertResult(h);
+  await settle(h, 1);
+  assertResult(h);
+  assert.equal(calls.resultDialogs.length, 2);
+});
+
+test('old close callback cannot cancel a new gesture when the previous snapshot remains without a new dialog', t => {
+  const h = harness(t);
+  const { state: s, calls } = h;
+  const old = solveOrdinary(h);
+  const oldResult = s.solveResult;
+  s.resetSession();
+  oneMoveAway(h);
+  touch(h, TouchType.Down);
+  assert.equal(s.touching, true);
+  assert.equal(s.solveResult, oldResult, 'no new result has replaced the old snapshot');
+  assert.notEqual(s.sessionId, oldResult.sessionId);
+  assert.equal(s.resultDialog, null);
+  const version = s.gestureVersion;
+  const board = snapshot(s.model);
+  dismissResult(old);
+  assert.equal(s.touching, true, 'the old session must not invalidate the current gesture');
+  assert.equal(s.pointerCount, 1);
+  assert.equal(s.gestureVersion, version);
+  assert.equal(s.layerGestureCurrent(), true);
+  assert.equal(snapshot(s.model), board);
+  assert.equal(s.phase, 'ready');
+  assert.equal(s.resultVisible, false);
+  assert.equal(old.closes, 1);
+  assert.equal(calls.resultDialogs.length, 1);
+  touch(h, TouchType.Up, 160, 140);
+  assert.equal(s.touching, false);
 });
 
 test('tutorial rejects the wrong move, advances only after commits and never saves', t => {
@@ -777,6 +1049,9 @@ test('tutorial rejects the wrong move, advances only after commits and never sav
   assert.equal(s.startedAt, 0);
   assert.equal(calls.feedback.length, 5);
   assert.match(s.hint, /教程完成/);
+  s.finishSolve();
+  s.showSolveResult();
+  assert.equal(calls.resultDialogs.length, 0, 'beginner tutorial keeps its inline feedback');
 });
 
 test('beginner gesture guides default on; toggling redraws immediately and persists without changing the session', t => {
@@ -1433,11 +1708,16 @@ test('free practice and continuing after solved never create another ranked solv
   assert.equal(s.model.isSolved(), true);
   assert.equal(s.phase, 'idle');
   assert.equal(calls.records.length, 0);
+  s.finishSolve();
+  s.showSolveResult();
+  assert.equal(calls.resultDialogs.length, 0, 'solving in free practice never opens results');
   s.resetSession();
   const { inverse } = oneMoveAway(h);
   s.requestMove(inverse);
   completeMove(h);
   await settle(h);
+  assert.equal(s.resultVisible, true);
+  s.closeSolveResult();
   s.requestMove(move);
   assert.equal(s.phase, 'idle');
   assert.equal(s.elapsed, 0);
@@ -1456,8 +1736,13 @@ for (const leave of [false, true]) {
     const { state: s } = h;
     s.requestMove(inverse);
     completeMove(h);
+    const dialog = assertResult(h);
     if (leave) s.leavePage();
     await settle(h, 0, false);
+    assert.equal(h.calls.resultDialogs.length, 1);
+    assert.equal(s.resultVisible, !leave);
+    assert.equal(dialog.closes, leave ? 1 : 0);
+    if (!leave) assertResult(h);
     assert.equal(h.calls.records.length, 1);
     assert.equal(s.records.length, 0);
     if (leave) {
@@ -1520,9 +1805,14 @@ for (const success of [true, false]) {
     assert.equal(s.assisted, true);
     assert.equal(h.calls.records.length, 1, 'only the first solve was submitted');
     const assistedHint = s.hint;
+    const dialog = assertResult(h);
+    const result = s.solveResult;
     assert.match(assistedHint, /不记录成绩/);
     await settle(h, 0, success);
     assert.equal(s.hint, assistedHint, 'save callbacks must belong to their originating session');
+    assert.equal(s.solveResult, result);
+    assert.equal(assertResult(h), dialog);
+    assert.equal(h.calls.resultDialogs.length, 2);
   });
 }
 
@@ -1707,6 +1997,7 @@ for (const [index, challenge] of createTeachingChallenges().entries()) {
       assert.equal(s.hintKey, 'teaching_saving');
       assert.equal(s.hint, s.tr('teaching_saving'));
       assert.equal(s.teachingRecords.length, 0, 'pending saves do not mark stored progress');
+      const dialog = assertResult(h);
       assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_new'));
       assert.equal(s.teachingBest(challenge), '');
       const passed = snapshot(s.model);
@@ -1735,6 +2026,8 @@ for (const [index, challenge] of createTeachingChallenges().entries()) {
       assert.equal(s.teachingBest(challenge), s.tr('teaching_best', solution.length, s.formatTime(record.durationMs)));
       assert.equal(s.hintKey, 'teaching_saved');
       assert.equal(s.hint, s.tr('teaching_saved'));
+      assert.equal(assertResult(h), dialog, 'teaching saves leave the result unchanged');
+      assert.equal(calls.resultDialogs.length, 1);
       assert.equal(s.records.length, 0);
       assert.equal(s.bestTime(challenge.order), '—');
       assert.equal(s.orderSolves(challenge.order), 0);
@@ -1782,7 +2075,9 @@ test('teaching hints mark guidance immediately and a real solve still saves teac
   assert.equal(calls.teachingRecords.length, 1);
   assert.equal(calls.teachingRecords[0].assisted, true);
   assert.equal(calls.records.length, 0);
+  assertResult(h);
   await settle(h);
+  assertResult(h);
   assert.equal(s.teachingStatus(challenge), s.tr('teaching_status_guided'));
   assert.equal(s.records.length, 0);
 });
@@ -2110,7 +2405,12 @@ for (const success of [true, false]) {
     assert.equal(s.assisted, true);
     assert.equal(calls.pending.length, 2);
     const hint = s.hint;
+    const dialog = assertResult(h);
+    const result = s.solveResult;
     await settle(h, 0, success);
+    assert.equal(s.solveResult, result);
+    assert.equal(assertResult(h), dialog);
+    assert.equal(calls.resultDialogs.length, 2);
     assert.equal(s.hint, hint);
     assert.equal(s.hintKey, 'teaching_saving');
     assert.equal(s.phase, 'solved');
@@ -2119,6 +2419,7 @@ for (const success of [true, false]) {
     assert.equal(s.teachingStatus(second), s.tr('teaching_status_new'));
     if (!success) assert.deepEqual(calls.toasts, [s.tr('teaching_previous_save_failed')]);
     await settle(h, 1);
+    assert.equal(assertResult(h), dialog);
     assert.equal(s.teachingStatus(second), s.tr('teaching_status_guided'));
     assert.equal(s.hintKey, 'teaching_saved');
     assert.equal(calls.records.length, 0);
@@ -2243,6 +2544,7 @@ test('passed teaching board supports view inspection without layer moves or begi
   s.canvasMounted();
   solveTeaching(h);
   await settle(h);
+  s.closeSolveResult();
   const before = snapshot(s.model);
   const corners = calls.drawBeginnerGuides.length;
   const feedback = calls.feedback.length;

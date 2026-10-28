@@ -4,10 +4,15 @@ import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
 import test from 'node:test';
 import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
+import { formatResource, productionMember } from './resource-helper.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
 const source = read('entry/src/main/ets/pages/Index.ets');
+const resultSource = read('entry/src/main/ets/pages/SolveResultDialog.ets');
+const resultMethods = stripTypeScriptTypes(`class LocalizedResult {
+  ${productionMember(resultSource, 'formatTime')}
+}; LocalizedResult;`);
 const ability = read('entry/src/main/ets/entryability/EntryAbility.ets');
 const scopes = ['AppScope', 'entry/src/main'];
 const locales = ['base', 'en', 'en_US'];
@@ -121,6 +126,47 @@ test('page and ability labels are fully resource-backed without hardcoded Chines
   assert.match(source, /private sectionTitle\(kickerKey: string, titleKey: string\)/);
   assert.match(source, /Text\(this\.tr\(titleKey\)\)/);
   assert.doesNotMatch(source, /this\.(?:header|sectionTitle)\(this\.tr\(/);
+});
+
+test('independent result component resolves every resource in Chinese, shared English and US English', () => {
+  assert.doesNotMatch(resultSource, /[\u3400-\u9fff]/);
+  assert.doesNotMatch(resultSource, /\b(?:Text|Button)\(\s*['"][^'"]+['"]/,
+    'visible result copy must not be a literal outside resources');
+  const refs = new Set([...resultSource.matchAll(/\$r\('app\.string\.([^']+)'/g)].map(match => match[1]));
+  assert.deepEqual([...refs].sort(), ['result_solved', 'teaching_passed', 'teaching_passed_guided',
+    'cube_title', 'teaching_level', 'elapsed_time', 'move_count'].sort());
+  assert.match(resultSource, /\$r\('app\.string\.cube_title', this\.result\.order\)/);
+  assert.match(resultSource, /\$r\('app\.string\.teaching_level', this\.result\.challengeIndex \+ 1\)/);
+  const args = { cube_title: [5], teaching_level: [8] };
+  for (const locale of locales) {
+    for (const key of refs) {
+      const value = strings[locale][key];
+      assert.equal(typeof value, 'string', `${locale}: missing result resource ${key}`);
+      const formatted = formatResource(value, args[key] ?? []);
+      assert.ok(formatted.trim());
+      assert.doesNotMatch(formatted, /%\d+\$[sd]/, `${locale}: unresolved result argument ${key}`);
+    }
+    assert.deepEqual(Object.keys(strings[locale]).filter(key => key.startsWith('result_')), ['result_solved']);
+  }
+});
+
+test('centered result titles use narrow punctuation without trailing whitespace', () => {
+  for (const key of ['result_solved', 'teaching_passed', 'teaching_passed_guided']) {
+    for (const locale of locales) {
+      const title = strings[locale][key];
+      assert.ok(title.endsWith('!'), `${locale}: ${key} must use a half-width exclamation mark`);
+      assert.equal(title, title.trim(), `${locale}: ${key} must not include alignment whitespace`);
+      assert.doesNotMatch(title, /！/);
+    }
+  }
+});
+
+test('result time formatter preserves the frozen duration without locale-specific placeholders', () => {
+  const Result = vm.runInNewContext(resultMethods);
+  const dialog = new Result();
+  for (const [duration, expected] of [[0, '00:00.00'], [220, '00:00.22'], [61_239, '01:01.23']]) {
+    assert.equal(dialog.formatTime(duration), expected);
+  }
 });
 
 test('actual page formatter supports shared English, US English and GB English with complete arguments', () => {

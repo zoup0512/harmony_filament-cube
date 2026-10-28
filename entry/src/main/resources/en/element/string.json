@@ -137,6 +137,10 @@
       "value": "Solved, but your result could not be saved on this device."
     },
     {
+      "name": "result_solved",
+      "value": "Cube solved!"
+    },
+    {
       "name": "previous_save_failed",
       "value": "The previous result could not be saved."
     },

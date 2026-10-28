@@ -6,6 +6,8 @@ import { CubeRenderer } from '../render/CubeRenderer';
 import { CubeStore, CubeSettings, SolveRecord, TeachingRecord } from '../storage/CubeStore';
 import { CubeFeedback } from '../platform/CubeFeedback';
 import { CubeTheme } from './CubeTheme';
+import { SolveResult } from '../model/SolveResult';
+import { SolveResultDialog } from './SolveResultDialog';
 
 @Entry
 @Component
@@ -31,6 +33,9 @@ struct Index {
   @State private storageWarning: string = '';
   @State private assisted: boolean = false;
   @State private viewportHeight: number = 740;
+  @State private solveResult: SolveResult = new SolveResult();
+  private resultVisible: boolean = false;
+  private resultDialog: CustomDialogController | null = null;
   @StorageLink('cubeForeground') @Watch('onForegroundChanged') private foreground: boolean = true;
 
   @StorageLink('cubeLanguage') @Watch('onLanguageChanged') private language: string = '';
@@ -100,12 +105,17 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    this.closeSolveResult();
     this.invalidateGesture();
     this.stopTimers();
     this.feedback.release();
   }
 
   onBackPress(): boolean {
+    if (this.resultVisible) {
+      this.closeSolveResult();
+      return true;
+    }
     if (this.page !== 'home') {
       this.goHome();
       return true;
@@ -324,6 +334,7 @@ struct Index {
   }
 
   private resetSession(): void {
+    this.closeSolveResult();
     this.invalidateGesture();
     this.sessionId++;
     this.queue = [];
@@ -553,7 +564,7 @@ struct Index {
   }
 
   private requestMove(move: CubeMove): void {
-    if (this.busy || !this.foreground || this.page !== 'game' ||
+    if (this.resultVisible || this.busy || !this.foreground || this.page !== 'game' ||
       (this.challengeIndex >= 0 && this.phase === 'solved')) { return; }
     if (this.phase === 'tutorial') {
       if (this.lessonIndex < this.lesson.length && this.sameMove(move, this.lesson[this.lessonIndex])) {
@@ -635,6 +646,45 @@ struct Index {
     this.setHint('lesson_step', this.lessonIndex + 1, this.lessonTotal, this.moveLabel(this.lesson[this.lessonIndex]));
   }
 
+  private showSolveResult(): void {
+    if (this.page !== 'game' || this.phase !== 'solved' || this.busy || !this.foreground ||
+      this.solveResult.sessionId === this.sessionId) { return; }
+    const savedSession = this.sessionId;
+    this.solveResult = new SolveResult(savedSession, this.order, this.elapsed, this.moves,
+      this.challengeIndex, this.assisted);
+    this.invalidateGesture();
+    this.resultVisible = true;
+    this.resultDialog = new CustomDialogController({
+      builder: SolveResultDialog({
+        result: this.solveResult,
+        viewportHeight: this.viewportHeight
+      }),
+      alignment: DialogAlignment.Center,
+      customStyle: true,
+      autoCancel: true,
+      isModal: true,
+      maskColor: '#66182D2A',
+      openAnimation: { duration: 180, curve: Curve.EaseOut },
+      closeAnimation: { duration: 120, curve: Curve.EaseIn },
+      onWillDismiss: (action: DismissDialogAction) => {
+        if (action.reason === DismissReason.PRESS_BACK || action.reason === DismissReason.TOUCH_OUTSIDE) {
+          this.closeSolveResult(savedSession);
+          action.dismiss();
+        }
+      }
+    });
+    this.resultDialog.open();
+  }
+
+  private closeSolveResult(savedSession: number = this.sessionId): void {
+    if (savedSession !== this.sessionId || savedSession !== this.solveResult.sessionId) { return; }
+    this.resultVisible = false;
+    const dialog = this.resultDialog;
+    this.resultDialog = null;
+    if (dialog !== null) { dialog.close(); }
+    this.invalidateGesture();
+  }
+
   private finishTeaching(): void {
     const challenge = this.challenges[this.challengeIndex];
     const record = new TeachingRecord(challenge.id, this.elapsed, this.moves, this.assisted);
@@ -653,6 +703,9 @@ struct Index {
     if (this.phase !== 'playing' || this.busy || !this.model.isSolved()) { return; }
     this.elapsed = this.timeBase + Date.now() - this.startedAt;
     this.phase = 'solved';
+    this.hintMove = null;
+    this.draw();
+    this.showSolveResult();
     if (this.challengeIndex >= 0) {
       this.finishTeaching();
       return;
@@ -735,7 +788,7 @@ struct Index {
   }
 
   private touch(event: TouchEvent): void {
-    if (event.type === TouchType.Cancel || !this.foreground) {
+    if (event.type === TouchType.Cancel || !this.foreground || this.resultVisible) {
       this.invalidateGesture();
       return;
     }
