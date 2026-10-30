@@ -254,7 +254,7 @@
     },
     {
       "name": "start_game",
-      "value": "开始挑战  →"
+      "value": "开始挑战"
     },
     {
       "name": "statistics",
@@ -318,7 +318,7 @@
     },
     {
       "name": "undo",
-      "value": "↶ 撤销"
+      "value": "撤销"
     },
     {
       "name": "history_help",
@@ -327,10 +327,6 @@
     {
       "name": "teaching",
       "value": "进阶教学"
-    },
-    {
-      "name": "teaching_entry_title",
-      "value": "进阶教学  →"
     },
     {
       "name": "teaching_kicker",
@@ -578,7 +574,7 @@
     },
     {
       "name": "personal_best",
-      "value": "PERSONAL BEST"
+      "value": "个人最佳"
     },
     {
       "name": "stats_tagline",
@@ -654,7 +650,7 @@
     },
     {
       "name": "beginner_guides_help",
-      "value": "跟随角块上的手势滑动，松手转层\n仅在可视面四角显示小手与淡色滑动轨迹\n中间方块也可滑动，不提供还原答案"
+      "value": "在可视面四角显示小手与淡色滑动轨迹，中间方块也可滑动；仅示范操作，不提供还原答案。"
     },
     {
       "name": "turn_sound",
@@ -683,6 +679,54 @@
     {
       "name": "about_description",
       "value": "轻量三维魔方，随时开启。所有计算与成绩都留在本机，无广告，也无需联网。"
+    },
+    {
+      "name": "home_tutorial_link",
+      "value": "新手？先试试五步入门教程"
+    },
+    {
+      "name": "result_again",
+      "value": "再来一次"
+    },
+    {
+      "name": "result_done",
+      "value": "完成"
+    },
+    {
+      "name": "result_new_best",
+      "value": "新纪录"
+    },
+    {
+      "name": "result_assisted_note",
+      "value": "使用了提示 · 本次不计成绩"
+    },
+    {
+      "name": "teaching_rules_title",
+      "value": "规则说明"
+    },
+    {
+      "name": "teaching_group",
+      "value": "%1$d 阶关卡"
+    },
+    {
+      "name": "stats_trend",
+      "value": "最近 %1$d 次 · %2$d 阶"
+    },
+    {
+      "name": "order_accessibility_selected",
+      "value": "%1$d 阶，已选择"
+    },
+    {
+      "name": "teaching_goal_tip",
+      "value": "本关技巧"
+    },
+    {
+      "name": "teaching_goal_reference",
+      "value": "参考步数"
+    },
+    {
+      "name": "teaching_goal_rules",
+      "value": "关于提示"
     }
   ]
 }

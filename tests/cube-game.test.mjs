@@ -18,8 +18,8 @@ const { SolveResult } = await import(`data:text/javascript;base64,${Buffer.from(
 // layout changes must fail extraction rather than silently use fallback logic.
 const pageUrl = new URL('../entry/src/main/ets/pages/Index.ets', import.meta.url);
 const source = readFileSync(pageUrl, 'utf8');
-const baseCanvasSource = source.match(/private cubeCanvas\(\) \{[\s\S]*?^  \}/m)[0];
-const guidanceCanvasSource = source.match(/private guidanceCanvas\(\) \{[\s\S]*?^  \}/m)[0];
+const baseCanvasSource = source.match(/private cubeCanvas\(owner: string\) \{[\s\S]*?^  \}/m)[0];
+const guidanceCanvasSource = source.match(/private guidanceCanvas\(owner: string\) \{[\s\S]*?^  \}/m)[0];
 const names = [
   'startTimers', 'stopTimers', 'onForegroundChanged', 'draw', 'drawGuidance', 'clearGuidance', 'frame', 'animate',
   'resetSession', 'confirmReset', 'resetStepByStep', 'phaseLabel', 'chooseOrder', 'startGame', 'leavePage', 'doScramble',
@@ -27,10 +27,11 @@ const names = [
   'doLesson', 'updateLessonHint', 'invalidateGesture', 'finishSolve', 'toast',
   'loadData', 'saveSettings', 'setBeginnerGuides', 'guideTarget', 'resetGuide',
   'touch', 'layerGestureCurrent', 'setTouchOrigin', 'moveOrbit',
-  'tr', 'setHint', 'onLanguageChanged', 'formatTime', 'bestTime', 'orderSolves',
+  'tr', 'setHint', 'onLanguageChanged', 'formatTime', 'bestTime', 'orderSolves', 'orderDescription', 'dateLabel',
   'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge',
-  'teachingStatus', 'teachingBest', 'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startLesson', 'showTeachingGoal',
-  'showSolveResult', 'closeSolveResult', 'aboutToDisappear'
+  'teachingStatus', 'teachingBest', 'teachingKind', 'teachingGroups', 'statsRows', 'recentRows', 'trendBars',
+  'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startTutorial', 'showTeachingGoal',
+  'showSolveResult', 'isNewBest', 'resultPrimary', 'closeSolveResult', 'aboutToDisappear', 'syncNav'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
@@ -41,13 +42,12 @@ const members = names.map(name => {
 // Execute the plain callback bodies as well, so remount/resize/view tests use
 // exactly the handlers attached by the production ArkUI builders.
 for (const [name, parameters, pattern, callbackSource = source] of [
-  ['canvasMounted', '', /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, baseCanvasSource],
-  ['canvasDisappeared', '', /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, baseCanvasSource],
+  ['canvasMounted', "owner = 'game'", /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, baseCanvasSource],
+  ['canvasDisappeared', "owner = 'game'", /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, baseCanvasSource],
   ['canvasResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m, baseCanvasSource],
-  ['guidanceMounted', '', /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
-  ['guidanceDisappeared', '', /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
+  ['guidanceMounted', "owner = 'game'", /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
+  ['guidanceDisappeared', "owner = 'game'", /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
   ['guidanceResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m, guidanceCanvasSource],
-  ['gameAppeared', '', /\.onAppear\(\(\) => (this\.gameScroller\.scrollTo\(\{ xOffset: 0, yOffset: 0 \}\))\)/],
   ['frontView', '', /\.onClick\(\(\) => \{ (this\.invalidateGesture\(\); this\.yaw = 0\.62;[^\r\n]*) \}\)/]
 ]) {
   const match = callbackSource.match(pattern);
@@ -66,10 +66,21 @@ const teachingClasses = [...storeSource.matchAll(/^export class TeachingRecord \
 assert.equal(teachingClasses.length, 1, 'use the real TeachingRecord value object');
 const settingsClasses = [...storeSource.matchAll(/^export class CubeSettings \{\r?\n[\s\S]*?^\}/gm)];
 assert.equal(settingsClasses.length, 1, 'use the real CubeSettings defaults');
+// View models handed to the extracted page components are real exported classes as well.
+const viewModels = [['StatsPage', ['StatsOrderRow', 'StatsRecentRow']], ['TeachingPage', ['TeachingItem', 'TeachingGroup']]]
+  .flatMap(([file, classes]) => {
+    const component = readFileSync(new URL(`../entry/src/main/ets/components/${file}.ets`, import.meta.url), 'utf8');
+    return classes.map(name => {
+      const matches = [...component.matchAll(new RegExp(`^export class ${name} \\{\\r?\\n[\\s\\S]*?^\\}`, 'gm'))];
+      assert.equal(matches.length, 1, `use the real ${name} view model`);
+      return matches[0][0].replace(/^export /, '');
+    });
+  });
 const executable = stripTypeScriptTypes([
   recordClasses[0][0].replace(/^export /, ''),
   teachingClasses[0][0].replace(/^export /, ''),
   settingsClasses[0][0].replace(/^export /, ''),
+  ...viewModels,
   `class GameHarness {\n${declarations}\n${members.join('\n')}\n}`,
   'GameHarness;'
 ].join('\n'));
@@ -91,9 +102,16 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   const timers = new Map();
   const calls = {
     draw: [], getSwipeGuide: [], drawGuide: [], drawBeginnerGuides: [],
-    feedback: [], records: [], teachingRecords: [], pending: [], toasts: [], settings: [], dialogs: [], scroll: [],
+    feedback: [], records: [], teachingRecords: [], pending: [], toasts: [], settings: [], dialogs: [], nav: [],
     resultDialogs: [], release: []
   };
+  class MockNavPathStack {
+    names = [];
+    getAllPathName() { return [...this.names]; }
+    clear(animated) { calls.nav.push(['clear', animated]); this.names = []; }
+    popToIndex(index, animated) { calls.nav.push(['pop', index, animated]); this.names = this.names.slice(0, index + 1); }
+    pushPathByName(name, param, animated) { calls.nav.push(['push', name, animated]); this.names.push(name); }
+  }
   const guide = guideVisible ? { startX: 100, startY: 120, endX: 150, endY: 140 } : null;
   class FakeDate extends Date {
     constructor(...args) { super(...(args.length ? args : [now])); }
@@ -130,6 +148,8 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
   const GameHarness = script.runInNewContext({
     CubeModel, CubeMove, SolveResult, TeachingChallenge, createTeachingChallenges,
     TouchType, DialogAlignment, Curve, DismissReason, Date: FakeDate, CubeStore: MockStore,
+    NavPathStack: MockNavPathStack, $r: (name, ...args) => ({ resource: name, args }),
+    CubeTheme: new Proxy({}, { get: (_target, token) => `theme:${String(token)}` }),
     // Preserve the production options, linked result and callbacks; do not model
     // game transitions here. ArkUI layout itself is checked in cube-ui.test.mjs.
     SolveResultDialog: props => props,
@@ -164,7 +184,6 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
       clears = [];
       clearRect(...args) { this.clears.push(args); }
     }, RenderingContextSettings: class {},
-    Scroller: class { scrollTo(options) { calls.scroll.push({ ...options }); } },
     setInterval(callback, delay) {
       const id = nextTimer++;
       timers.set(id, { callback, delay });
@@ -182,9 +201,16 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
     getPromptAction: () => ({ showToast: ({ message }) => calls.toasts.push(message) }),
     showAlertDialog: dialog => calls.dialogs.push(dialog)
   });
+  // Emulate @Watch('syncNav'): ArkUI calls the watcher synchronously after a changed assignment.
+  let page = state.page;
+  Object.defineProperty(state, 'page', {
+    get: () => page,
+    set: value => { const changed = value !== page; page = value; if (changed) state.syncNav(); }
+  });
   state.startGame();
   state.canvasReady = canvasReady;
   state.guidanceReady = canvasReady;
+  state.canvasOwner = state.guidanceOwner = canvasReady ? 'game' : '';
   state.guidanceWidth = state.canvasWidth;
   state.guidanceHeight = state.canvasHeight;
   const clock = {
@@ -273,16 +299,12 @@ test('teaching goal details preserve the attempt and never count as solve assist
   const session = s.sessionId;
   for (const phase of ['ready', 'playing', 'solved']) {
     s.phase = phase;
+    s.touching = true;
     s.showTeachingGoal();
-    const dialog = calls.dialogs.at(-1);
-    assert.ok(dialog.title.includes(s.tr(s.challenges[0].titleKey)));
-    for (const text of [s.tr('teaching_goal_summary'), s.tr(s.challenges[0].tipKey),
-      s.tr('teaching_start_hint'), s.tr('teaching_hint_note'),
-      s.tr('teaching_level_details', s.order, s.challenges[0].referenceMoves)]) {
-      assert.ok(dialog.message.includes(text));
-    }
-    assert.equal(dialog.primaryButton.value, s.tr('teaching_goal_close'));
-    dialog.primaryButton.action();
+    assert.equal(s.goalVisible, true, 'the goal opens as a bottom sheet');
+    assert.equal(s.touching, false, 'opening the sheet releases any pending cube gesture');
+    assert.equal(calls.dialogs.length, 0, 'the goal is not a system alert');
+    s.goalVisible = false;
     assert.equal(snapshot(s.model), position);
     assert.equal(s.sessionId, session);
     assert.equal(s.phase, phase);
@@ -306,6 +328,7 @@ test('teaching goal details ignore normal games, invalid levels and background r
   s.challengeIndex = s.challenges.length;
   s.showTeachingGoal();
   assert.equal(calls.dialogs.length, 0);
+  assert.equal(s.goalVisible, false);
 });
 
 function snapshot(model) { return JSON.stringify(model.cubies); }
@@ -1900,9 +1923,7 @@ for (const [index, challenge] of createTeachingChallenges().entries()) {
     enterTeaching(h, index);
     assertChallengeReady(h, index);
     assert.equal(h.state.practiceOrder, 5);
-    assert.equal(h.calls.scroll.length, 0, 'new game Scroll waits for its mount callback');
-    h.state.gameAppeared();
-    assert.deepEqual(h.calls.scroll, [{ xOffset: 0, yOffset: 0 }]);
+    assert.deepEqual(h.state.navStack.getAllPathName(), ['teaching', 'game'], 'levels open above the catalogue');
     h.state.startTimers();
     h.clock.advance(30_000);
     h.clock.fire(h.state.clockTimer);
@@ -2137,7 +2158,7 @@ test('retry reloads the exact baseline and clears timer, counters, hint, assista
   calls.dialogs[0].secondaryButton.action();
   assert.ok(s.sessionId > session);
   assert.equal(s.canvasReady, true, 'same game page retains its ready canvas');
-  assert.deepEqual(calls.scroll, [{ xOffset: 0, yOffset: 0 }], 'retry reveals the restored position and goal');
+  assert.deepEqual(s.navStack.getAllPathName(), ['teaching', 'game'], 'retry stays on the same level page');
   assert.equal(s.practiceOrder, 5);
   assertChallengeReady(h, 2);
   assert.equal(s.model.redo(), null);
@@ -2228,7 +2249,7 @@ for (const phase of ['ready', 'playing', 'solved']) {
     const session = s.sessionId;
     const hint = s.hint;
     const moves = s.moves;
-    for (const action of ['scramble', 'doScramble', 'startLesson', 'doLesson', 'confirmReset', 'resetStepByStep']) {
+    for (const action of ['scramble', 'doScramble', 'startTutorial', 'doLesson', 'confirmReset', 'resetStepByStep']) {
       s[action]();
       assert.equal(snapshot(s.model), before, action);
       assert.equal(s.sessionId, session, action);
@@ -2267,7 +2288,7 @@ test('next requires an actually passed challenge, ignores background input and r
   s.foreground = true;
   s.nextChallenge();
   assertChallengeReady(h, 1);
-  assert.deepEqual(calls.scroll, [{ xOffset: 0, yOffset: 0 }], 'next reveals the new position and goal');
+  assert.deepEqual(s.navStack.getAllPathName(), ['teaching', 'game'], 'next replaces the level in place');
   assert.equal(s.practiceOrder, 5);
   s.startChallenge(s.challenges.length - 1);
   solveTeaching(h);
@@ -2625,4 +2646,171 @@ test('overlay cleanup on busy, background, unmount and no target never clears or
   s.beginnerGuides = true;
   s.drawGuidance();
   assert.equal(calls.drawBeginnerGuides.at(-1)[0], s.guidanceContext);
+});
+
+function solveNormal(h) {
+  const { inverse } = oneMoveAway(h);
+  h.state.requestMove(inverse);
+  completeMove(h);
+  assert.equal(h.state.phase, 'solved');
+}
+
+test('navigation stack mirrors the page: game, stats and settings sit on home, levels on the catalogue', t => {
+  const h = harness(t);
+  const { state: s } = h;
+  const stack = () => s.navStack.getAllPathName();
+  assert.deepEqual(stack(), ['game']);
+  s.leavePage();
+  assert.deepEqual(stack(), []);
+  s.page = 'stats';
+  assert.deepEqual(stack(), ['stats']);
+  s.startGame();
+  assert.deepEqual(stack(), ['game'], 'starting from the empty statistics state replaces statistics');
+  s.goHome();
+  assert.deepEqual(stack(), []);
+  enterTeaching(h, 2);
+  assert.deepEqual(stack(), ['teaching', 'game']);
+  s.startChallenge(3);
+  assert.deepEqual(stack(), ['teaching', 'game'], 'same-page level changes never push another page');
+  s.goHome();
+  assert.equal(s.page, 'teaching');
+  assert.deepEqual(stack(), ['teaching']);
+  s.goHome();
+  assert.deepEqual(stack(), []);
+  assert.deepEqual(h.calls.nav.filter(op => op[0] === 'pop'), [['pop', 0, true]], 'leaving a level pops back to the catalogue');
+});
+
+test('system back on any destination routes through the existing confirmation flow', t => {
+  const h = harness(t);
+  const { state: s, calls } = h;
+  oneMoveAway(h);
+  assert.equal(s.onBackPress(), true);
+  assert.equal(calls.dialogs.length, 1, 'a ready game asks before leaving');
+  assert.deepEqual(s.navStack.getAllPathName(), ['game']);
+  calls.dialogs[0].secondaryButton.action();
+  assert.deepEqual(s.navStack.getAllPathName(), []);
+  assert.equal(s.onBackPress(), false, 'home lets the system close the app');
+});
+
+test('normal result offers Done and Go again; Go again closes the dialog and scrambles a new session', t => {
+  const h = harness(t);
+  const { state: s, calls } = h;
+  solveNormal(h);
+  const dialog = assertResult(h);
+  const props = dialog.options.builder;
+  assert.deepEqual(props.primaryLabel, { resource: 'app.string.result_again', args: [] });
+  assert.equal(props.newBest, true, 'the first unaided solve of a size is a new best');
+  const session = s.sessionId;
+  props.onPrimary();
+  assert.equal(dialog.closes, 1);
+  assert.equal(s.resultVisible, false);
+  assert.ok(s.sessionId > session);
+  assert.equal(s.busy, true);
+  assert.equal(s.queueKind, 'scramble');
+  props.onPrimary();
+  assert.equal(calls.resultDialogs.length, 1, 'stale result actions are ignored');
+  assert.equal(s.queueKind, 'scramble');
+});
+
+test('result Done only closes; assisted and slower solves are not new bests', async t => {
+  const h = harness(t);
+  const { state: s } = h;
+  solveNormal(h);
+  const first = assertResult(h);
+  first.options.builder.onDone();
+  assert.equal(first.closes, 1);
+  assert.equal(s.phase, 'solved');
+  await settle(h);
+  assert.equal(s.records.length, 1);
+  assert.equal(s.isNewBest(s.order, s.records[0].durationMs), false, 'ties are not a new best');
+  assert.equal(s.isNewBest(s.order, s.records[0].durationMs - 1), true);
+  assert.equal(s.isNewBest(s.order + 1, s.records[0].durationMs + 10_000), true, 'bests are per size');
+  s.resetSession();
+  oneMoveAway(h);
+  s.showHint();
+  s.requestMove(s.hintMove);
+  completeMove(h);
+  assert.equal(h.calls.resultDialogs.at(-1).options.builder.newBest, false, 'assisted solves never claim a record');
+});
+
+test('teaching result primary action advances to the next level, or returns from the last one', t => {
+  const h = harness(t);
+  const { state: s } = h;
+  enterTeaching(h, 0);
+  solveTeaching(h);
+  const props = assertResult(h).options.builder;
+  assert.deepEqual(props.primaryLabel, { resource: 'app.string.teaching_next', args: [] });
+  assert.equal(props.newBest, false);
+  props.onPrimary();
+  assertChallengeReady(h, 1);
+  s.startChallenge(s.challenges.length - 1);
+  solveTeaching(h);
+  const last = h.calls.resultDialogs.at(-1).options.builder;
+  assert.deepEqual(last.primaryLabel, { resource: 'app.string.teaching_back', args: [] });
+  last.onPrimary();
+  assert.equal(s.page, 'teaching');
+  assert.deepEqual(s.navStack.getAllPathName(), ['teaching']);
+});
+
+test('home tutorial link starts the five-step lesson in a normal game', t => {
+  const h = harness(t);
+  const { state: s } = h;
+  s.leavePage();
+  s.startTutorial();
+  assert.equal(s.page, 'home', 'ignored until saved data has loaded');
+  s.loaded = true;
+  s.startTutorial();
+  assert.equal(s.page, 'game');
+  assert.deepEqual(s.navStack.getAllPathName(), ['game']);
+  assert.equal(s.queueKind, 'lessonSetup');
+  assert.equal(s.hintKey, 'lesson_preparing');
+  for (let i = 0; i < 5; i++) completeMove(h, 65 / s.speed);
+  assert.equal(s.phase, 'tutorial');
+  s.startTutorial();
+  assert.equal(s.phase, 'tutorial', 'only the home link can start it');
+});
+
+test('statistics view models mark one best per size and chart the current size oldest to newest', t => {
+  const { state: s } = harness(t);
+  s.records = [
+    { order: 3, durationMs: 9000, moves: 30, date: 5 },
+    { order: 3, durationMs: 6000, moves: 25, date: 4 },
+    { order: 2, durationMs: 3000, moves: 9, date: 3 },
+    { order: 3, durationMs: 6000, moves: 20, date: 2 },
+    { order: 3, durationMs: 12000, moves: 40, date: 1 }
+  ];
+  s.order = 3;
+  const recent = s.recentRows();
+  assert.equal(JSON.stringify(recent.map(row => row.best)), JSON.stringify([false, true, true, false, false]), 'ties keep the newest single badge');
+  assert.equal(recent[1].time, '00:06.00');
+  assert.equal(recent[1].label, s.tr('order_label', 3));
+  assert.equal(recent[1].details, s.tr('record_details', 25, s.dateLabel(4)));
+  assert.equal(JSON.stringify(s.trendBars()), JSON.stringify([1, 0.5, 0.5, 0.75]));
+  const rows = s.statsRows();
+  assert.equal(JSON.stringify(rows.map(row => [row.order, row.hasBest, row.best])),
+    JSON.stringify([[2, true, '00:03.00'], [3, true, '00:06.00'], [4, false, '—'], [5, false, '—']]));
+  assert.equal(rows[1].count, s.tr('completed_count', 4));
+  s.records = [];
+  assert.equal(JSON.stringify(s.trendBars()), JSON.stringify([]));
+  assert.equal(JSON.stringify(s.recentRows()), JSON.stringify([]));
+});
+
+test('teaching catalogue view models group levels by size with real status kinds', t => {
+  const { state: s } = harness(t);
+  const [first, second] = s.challenges;
+  s.teachingRecords = [
+    { challengeId: first.id, moves: 1, durationMs: 1230, assisted: false },
+    { challengeId: second.id, moves: 4, durationMs: 4560, assisted: true }
+  ];
+  const groups = s.teachingGroups();
+  assert.equal(JSON.stringify(groups.map(group => [group.order, group.items.length])), JSON.stringify([[2, 3], [3, 5]]));
+  const items = groups.flatMap(group => group.items);
+  assert.equal(JSON.stringify(items.map(item => item.index)), JSON.stringify([0, 1, 2, 3, 4, 5, 6, 7]));
+  assert.equal(JSON.stringify(items.slice(0, 3).map(item => item.kind)), JSON.stringify(['solved', 'guided', 'new']));
+  assert.equal(items[0].serial, '01');
+  assert.equal(items[0].title, s.tr(first.titleKey));
+  assert.equal(items[0].status, s.tr('teaching_status_solved'));
+  assert.equal(items[1].best, s.teachingBest(second));
+  assert.equal(items[2].best, '');
+  assert.equal(items[7].details, s.tr('teaching_level_details', s.challenges[7].order, s.challenges[7].referenceMoves));
 });

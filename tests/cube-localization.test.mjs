@@ -116,16 +116,31 @@ test('page and ability labels are fully resource-backed without hardcoded Chines
   assert.ok(refs.length > 100);
   for (const key of refs) assert.ok(Object.hasOwn(strings.base, key), `unknown resource ${key}`);
   assert.match(source, /accessibilityText\(this\.tr\('cube_accessibility', this\.order\)\)/);
-  assert.match(source, /Text\(this\.tr\('about_name'\)\)/);
   assert.match(source, /Text\(this\.tr\('brand_name'\)\)/);
   assert.match(ability, /onConfigurationUpdate\(configuration: Configuration\)/);
   assert.match(ability, /AppStorage\.setOrCreate\('cubeLanguage', configuration\.language/);
   assert.match(source, /@StorageLink\('cubeLanguage'\) @Watch\('onLanguageChanged'\)/);
   // Builder parameters are cached; translated strings must be resolved inside them.
-  assert.match(source, /private header\(titleKey: string, compactBack: boolean = false\)/);
-  assert.match(source, /private sectionTitle\(kickerKey: string, titleKey: string\)/);
-  assert.match(source, /Text\(this\.tr\(titleKey\)\)/);
-  assert.doesNotMatch(source, /this\.(?:header|sectionTitle)\(this\.tr\(/);
+  assert.match(source, /private homeTile\(labelKey: string, page: string\)/);
+  assert.match(source, /Text\(this\.tr\(labelKey\)\)/);
+  const builderCalls = [...source.matchAll(/this\.(\w+)\(([^)\r\n]*)\)/g)]
+    .filter(([, name]) => new RegExp(`^  @Builder\\r?\\n  private ${name}\\(`, 'm').test(source));
+  assert.ok(builderCalls.length > 10);
+  for (const [call, , args] of builderCalls) assert.doesNotMatch(args, /this\.tr\(/, `${call} passes a key, not a translation`);
+});
+
+const components = Object.fromEntries(['CubeWidgets', 'StatsPage', 'TeachingPage', 'SettingsPage']
+  .map(name => [name, read(`entry/src/main/ets/components/${name}.ets`)]));
+
+test('extracted page components resolve every visible label from resources in all locales', () => {
+  assert.match(components.SettingsPage, /Text\(\$r\('app\.string\.about_name'\)\)/);
+  for (const [name, component] of Object.entries(components)) {
+    assert.doesNotMatch(component, /[\u3400-\u9fff]/, `${name}: no hardcoded Chinese`);
+    assert.doesNotMatch(component, /\b(?:Text|Button)\(\s*['"][^'"]+['"]/, `${name}: no literal labels`);
+    for (const [, key] of component.matchAll(/\$r\('app\.string\.([^']+)'/g)) {
+      for (const locale of locales) assert.equal(typeof strings[locale][key], 'string', `${locale}: ${name} uses ${key}`);
+    }
+  }
 });
 
 test('independent result component resolves every resource in Chinese, shared English and US English', () => {
@@ -134,7 +149,8 @@ test('independent result component resolves every resource in Chinese, shared En
     'visible result copy must not be a literal outside resources');
   const refs = new Set([...resultSource.matchAll(/\$r\('app\.string\.([^']+)'/g)].map(match => match[1]));
   assert.deepEqual([...refs].sort(), ['result_solved', 'teaching_passed', 'teaching_passed_guided',
-    'cube_title', 'teaching_level', 'elapsed_time', 'move_count'].sort());
+    'cube_title', 'teaching_level', 'elapsed_time', 'move_count', 'result_again', 'result_done',
+    'result_new_best', 'result_assisted_note', 'teaching_completed_note'].sort());
   assert.match(resultSource, /\$r\('app\.string\.cube_title', this\.result\.order\)/);
   assert.match(resultSource, /\$r\('app\.string\.teaching_level', this\.result\.challengeIndex \+ 1\)/);
   const args = { cube_title: [5], teaching_level: [8] };
@@ -146,7 +162,8 @@ test('independent result component resolves every resource in Chinese, shared En
       assert.ok(formatted.trim());
       assert.doesNotMatch(formatted, /%\d+\$[sd]/, `${locale}: unresolved result argument ${key}`);
     }
-    assert.deepEqual(Object.keys(strings[locale]).filter(key => key.startsWith('result_')), ['result_solved']);
+    assert.deepEqual(Object.keys(strings[locale]).filter(key => key.startsWith('result_')).sort(),
+      ['result_again', 'result_assisted_note', 'result_done', 'result_new_best', 'result_solved']);
   }
 });
 

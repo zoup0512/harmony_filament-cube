@@ -338,12 +338,12 @@ function centiseconds(state) {
 const gameCanvas = state => state.nodes.find(n => n.type === 'Canvas' &&
   n.a.id === 'cube-base-canvas' && usable(n, state) && n.enabled);
 // Action buttons are disabled while the renderer is animating; face buttons no longer exist.
-// UI Test omits bottom controls pushed outside the Scroll viewport by hint text.
-// A committed tutorial instruction or an enabled history action identifies those
-// states; actual taps still require a visible usable button.
+// The game page is a fixed layout: hints overlay the cube and never push the tool row away.
+// A committed tutorial instruction or an enabled history action identifies teaching
+// states without Scramble/Reset; actual taps still require a visible usable button.
 const idleControls = state => {
   if (!gameCanvas(state)) return false;
-  const controls = ['打乱', '教程'].map(label => state.nodes.find(n => n.type === 'Button' &&
+  const controls = ['打乱', '复位'].map(label => state.nodes.find(n => n.type === 'Button' &&
     descendants(n).some(child => matches(child, label))));
   if (controls.some(Boolean)) return controls.every(n => n?.enabled);
   return enabledButton(state, BASE_STRINGS.history_help) ||
@@ -360,10 +360,9 @@ function assertTouchOnly(state) {
   check(obsolete.length === 0, 'no twelve face buttons or obsolete face-control title/instructions', {
     obsolete: obsolete.map(n => ({ text: n.text, type: n.type, bounds: n.a.bounds }))
   });
-  const labels = lesson(state) !== null ? [/撤销/, BASE_STRINGS.history_help, '正视角'] :
-    ['打乱', '教程', '复位', /撤销/, BASE_STRINGS.history_help, '正视角'];
+  const labels = ['打乱', '复位', /撤销/, BASE_STRINGS.history_help, '正视角'];
   check(labels.every(label => button(state, label)),
-    'retains phase-visible game controls; tutorial text may push bottom actions offscreen');
+    'retains the single game tool row and the overlaid front-view control in every phase');
 }
 function lesson(state) {
   for (const node of state.nodes.filter(n => usable(n, state))) {
@@ -609,8 +608,9 @@ async function main() {
   }
 
   await runCase('tutorial', async () => {
-    await game(3);
-    await tap('教程');
+    await home();
+    await tap('3 阶');
+    await tap(BASE_STRINGS.home_tutorial_link);
     const sequence = ['D', "L'", 'F', "U'", "R'"]; // Inverse of fixed setup R U F' L D'.
     await waitFor('tutorial setup completes at step 1/5 D', s => lesson(s)?.step === 1 && idleControls(s), 20000);
     await capture('tutorial-step-1');
@@ -746,7 +746,10 @@ async function main() {
   });
 
   await runCase('gesture-guides-switch', async () => {
-    const gameToggle = state => state.nodes.find(n => /Toggle|Switch/.test(n.type) && usable(n, state) && n.enabled);
+    // The game control is a toggle button over the cube; its accessibility text carries on/off.
+    const gameToggle = state => state.nodes.find(n => n.a.id === 'game-guides-toggle' && usable(n, state) && n.enabled);
+    const guideLabel = value => normalize(BASE_STRINGS.guides_accessibility.replace('%1$s', BASE_STRINGS[value ? 'on' : 'off']));
+    const gameState = (toggle, value) => Boolean(toggle) && observedText(toggle.a.description) === guideLabel(value);
     const settingsToggle = state => {
       const label = find(state, BASE_STRINGS.beginner_guides, 'Text');
       return descendants(label?.parent?.parent).find(n => /Toggle|Switch/.test(n.type) && usable(n, state) && n.enabled);
@@ -758,12 +761,13 @@ async function main() {
     };
     const hasState = (toggle, value) => Boolean(toggle) && String(toggle.a.checked) === String(value);
     const initial = await game(3);
-    const original = checked(gameToggle(initial));
+    const original = gameState(gameToggle(initial), true);
+    check(original || gameState(gameToggle(initial), false), 'game guide toggle announces its on/off state');
     try {
-      check(has(initial, BASE_STRINGS.guides_label), 'game labels the switch as gesture guides');
+      check(has(initial, BASE_STRINGS.guides_label), 'game labels the toggle as gesture guides');
       await capture('guides-game-initial');
       tapNode(gameToggle(initial), 'toggle game gesture guides');
-      let state = await waitFor('game guide switch changed', s => hasState(gameToggle(s), !original));
+      let state = await waitFor('game guide toggle changed', s => gameState(gameToggle(s), !original));
       check(moves(state) === 0 && timer(state) === '00:00.00', 'guide switch does not change moves or time');
       await capture('guides-game-toggled');
       await swipeFace('U');
@@ -781,7 +785,7 @@ async function main() {
       tapNode(settingsToggle(state), 'restore guide setting from settings');
       await waitFor('settings guide switch restored', s => hasState(settingsToggle(s), original));
       state = await game(3);
-      check(hasState(gameToggle(state), original), 'game reflects the settings guide switch');
+      check(gameState(gameToggle(state), original), 'game reflects the settings guide switch');
       await capture('guides-game-restored');
     } finally {
       await restart();
@@ -798,7 +802,7 @@ async function main() {
   await runCase('statistics', async () => {
     await home();
     await tap('成绩统计');
-    let state = await waitFor('statistics page', s => has(s, 'PERSONAL BEST') && has(s, /最近成绩/));
+    let state = await waitFor('statistics page', s => has(s, BASE_STRINGS.personal_best) && has(s, /最近成绩/));
     check([2, 3, 4, 5].every(n => has(state, `${n} 阶`)), 'statistics includes every order');
     state = await reveal('empty state or real records', s => has(s, /还没有成绩/) || s.nodes.some(n => /\d+ 步 ·/.test(n.text)));
     if (has(state, /还没有成绩/)) {

@@ -1,0 +1,30 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#0F1513" },
+    { "name": "cube_background", "value": "#0F1513" },
+    { "name": "cube_surface", "value": "#18201D" },
+    { "name": "cube_ink", "value": "#E6EEE9" },
+    { "name": "cube_secondary", "value": "#A9B8B1" },
+    { "name": "cube_muted", "value": "#909F98" },
+    { "name": "cube_accent", "value": "#D5F478" },
+    { "name": "cube_on_accent", "value": "#182D2A" },
+    { "name": "cube_green", "value": "#8FD3B6" },
+    { "name": "cube_mint", "value": "#1F2D28" },
+    { "name": "cube_soft", "value": "#1B2421" },
+    { "name": "cube_line", "value": "#2A3631" },
+    { "name": "cube_danger", "value": "#F08A7E" },
+    { "name": "cube_amber", "value": "#F2C46B" },
+    { "name": "cube_amber_soft", "value": "#33291A" },
+    { "name": "cube_hero", "value": "#22302B" },
+    { "name": "cube_on_hero", "value": "#F2F6F3" },
+    { "name": "cube_on_hero_muted", "value": "#C3D2CA" },
+    { "name": "cube_hero_track", "value": "#26FFFFFF" },
+    { "name": "cube_selected_border", "value": "#D5F478" },
+    { "name": "cube_stage_start", "value": "#1A2420" },
+    { "name": "cube_stage_end", "value": "#131C18" },
+    { "name": "cube_stage_ring", "value": "#2C3B35" },
+    { "name": "cube_stage_disc", "value": "#1F2C27" },
+    { "name": "cube_overlay", "value": "#E618201D" },
+    { "name": "cube_scrim", "value": "#99000000" }
+  ]
+}

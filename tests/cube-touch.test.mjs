@@ -37,7 +37,7 @@ const TouchHarness = runInNewContext(executable, {
   TouchType, GestureJudgeResult, GestureControl, CubeModel, SolveResult, TeachingChallenge, createTeachingChallenges,
   CubeRenderer: class {}, CubeStore: class {}, CubeFeedback: class {},
   CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
-  Scroller: class { scrollTo() {} }
+  NavPathStack: class { getAllPathName() { return []; } }
 }, { filename: sourceUrl.pathname });
 
 function point(id, x, y) {
@@ -483,8 +483,9 @@ test('disappearance clears touch ownership', () => {
 test('area, front view, and non-game navigation callbacks explicitly invalidate', () => {
   assert.match(source, /\.onAreaChange\(\(_old: Area, area: Area\) => \{\s*this\.invalidateGesture\(\);\s*this\.canvasWidth/);
   assert.match(source, /\.onClick\(\(\) => \{ this\.invalidateGesture\(\); this\.yaw = 0\.62; this\.pitch = -0\.42;/);
+  assert.ok(member('homeTile').includes('this.invalidateGesture(); this.canvasReady = false; this.page = page;'));
   for (const page of ['stats', 'settings']) {
-    assert.ok(source.includes(`this.invalidateGesture(); this.canvasReady = false; this.page = '${page}';`));
+    assert.match(member('homePage'), new RegExp(`this\\.homeTile\\('\\w+', '${page}'\\)`));
   }
   assert.ok(!member('frame').includes('invalidateGesture'), 'animation frames must not cancel orbit');
 });
@@ -502,9 +503,10 @@ for (const hit of [true, false]) {
     assert.equal(h.state.judgeScrollGesture(pan), GestureJudgeResult.CONTINUE);
   });
 }
-test('both Canvas-hosting Scrolls install the pre-acceptance Pan judge', () => {
-  for (const name of ['homePage', 'gamePage']) {
-    assert.match(member(name), /\.onGestureRecognizerJudgeBegin\(\(_event: BaseGestureEvent, current: GestureRecognizer\) =>\s*this\.judgeScrollGesture\(current\)\)/);
+test('the scrolling home preview installs the pre-acceptance Pan judge; the game page never scrolls', () => {
+  assert.match(member('homePage'), /\.onGestureRecognizerJudgeBegin\(\(_event: BaseGestureEvent, current: GestureRecognizer\) =>\s*this\.judgeScrollGesture\(current\)\)/);
+  for (const name of ['gamePage', 'gameStage', 'gameTools', 'gameHeader', 'gameSummary']) {
+    assert.doesNotMatch(member(name), /\b(?:Scroll|List)\(/, `${name} must not wrap the cube in a scroll container`);
   }
 });
 

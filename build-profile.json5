@@ -4,9 +4,9 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "compileSdkVersion": "6.1.1(24)",
+        "compileSdkVersion": "26.0.0(26.0.0)",
         "compatibleSdkVersion": "6.1.1(24)",
-        "targetSdkVersion": "6.1.1(24)",
+        "targetSdkVersion": "26.0.0(26.0.0)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
@@ -18,9 +18,9 @@
       {
         "name": "release",
         "signingConfig": "release",
-        "compileSdkVersion": "6.1.1(24)",
+        "compileSdkVersion": "26.0.0(26.0.0)",
         "compatibleSdkVersion": "6.1.1(24)",
-        "targetSdkVersion": "6.1.1(24)",
+        "targetSdkVersion": "26.0.0(26.0.0)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {

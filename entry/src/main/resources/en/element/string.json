@@ -254,7 +254,7 @@
     },
     {
       "name": "start_game",
-      "value": "Start challenge  →"
+      "value": "Start challenge"
     },
     {
       "name": "statistics",
@@ -318,7 +318,7 @@
     },
     {
       "name": "undo",
-      "value": "↶ Undo"
+      "value": "Undo"
     },
     {
       "name": "history_help",
@@ -327,10 +327,6 @@
     {
       "name": "teaching",
       "value": "Advanced lessons"
-    },
-    {
-      "name": "teaching_entry_title",
-      "value": "Advanced lessons  →"
     },
     {
       "name": "teaching_kicker",
@@ -654,7 +650,7 @@
     },
     {
       "name": "beginner_guides_help",
-      "value": "Follow the corner gestures; release to turn.\nHands and faint swipe paths appear only at visible corners.\nMiddle pieces work too. These guides do not solve the cube."
+      "value": "Hands and faint swipe paths appear only at visible corners. Middle pieces work too; guides do not solve the cube."
     },
     {
       "name": "turn_sound",
@@ -683,6 +679,54 @@
     {
       "name": "about_description",
       "value": "A lightweight 3D cube, ready anytime. All calculations and results stay on your device. No ads or internet required."
+    },
+    {
+      "name": "home_tutorial_link",
+      "value": "New here? Try the five-step tutorial"
+    },
+    {
+      "name": "result_again",
+      "value": "Go again"
+    },
+    {
+      "name": "result_done",
+      "value": "Done"
+    },
+    {
+      "name": "result_new_best",
+      "value": "New best"
+    },
+    {
+      "name": "result_assisted_note",
+      "value": "Hints used · not recorded"
+    },
+    {
+      "name": "teaching_rules_title",
+      "value": "How it works"
+    },
+    {
+      "name": "teaching_group",
+      "value": "%1$d×%1$d levels"
+    },
+    {
+      "name": "stats_trend",
+      "value": "Last %1$d solves · %2$d×%2$d"
+    },
+    {
+      "name": "order_accessibility_selected",
+      "value": "%1$d by %1$d, selected"
+    },
+    {
+      "name": "teaching_goal_tip",
+      "value": "Tip"
+    },
+    {
+      "name": "teaching_goal_reference",
+      "value": "Reference"
+    },
+    {
+      "name": "teaching_goal_rules",
+      "value": "About hints"
     }
   ]
 }
