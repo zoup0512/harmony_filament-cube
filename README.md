@@ -53,9 +53,9 @@
 
 本机验证环境：
 
-- Windows，DevEco Studio 内置 SDK **HarmonyOS 26.0.0**（2026-10-30 起；hvigor 要求 `compileSdkVersion` 与内置 SDK 一致，格式为 `26.0.0(26.0.0)`）。
-- 编译 / target：HarmonyOS **26.0.0 / API 26**。
-- 当前工程 compatible：HarmonyOS **6.1.1 / API 24**。界面代码避免使用 API 26 才支持的接口（例如 Shape 的资源色 `fill/stroke`），构建时 ArkTS 会对此类调用给出 WARN。
+- Windows，DevEco Studio **6.1.1.300**。
+- 编译 / target：HarmonyOS **6.1.1 / API 24**。
+- 当前工程 compatible：HarmonyOS **6.1.1 / API 24**（保留现有工程配置）。界面代码仍然避免使用 API 26 才支持的接口（例如 Shape 的资源色 `fill/stroke`），见 `AGENTS.md`。
 - 构建使用 DevEco 自带 Node、Hvigor、JBR；逻辑测试使用 **Node.js 24**。
 - 手机应用配置：`AppScope/app.json5` 的 `bundleType: app`；`entry/src/main/module.json5` 的 `installationFree: false`、`deliveryWithInstall: true`、`deviceTypes: ["phone"]`，保留桌面启动入口。
 - 包名为 `com.razor.filament.cube`（以 `AppScope/app.json5` 为准）。本地 `keystore/` 下的调试与发布 Profile 均绑定旧包名，需在 AppGallery Connect 按新包名重新生成并替换后才能签名安装。
