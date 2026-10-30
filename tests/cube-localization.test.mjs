@@ -167,11 +167,12 @@ test('independent result component resolves every resource in Chinese, shared En
   }
 });
 
-test('return-to-levels actions use explicit copy without changing the shared levels label', () => {
+test('return-to-levels actions use explicit copy and remove the obsolete noun label', () => {
+  assert.doesNotMatch(source, /\bteaching_back\b/);
   for (const locale of locales) {
     const { page } = harness(locale === 'base' ? 'zh-CN' : locale);
     assert.equal(page.tr('result_levels'), locale === 'base' ? '返回关卡' : 'Back to levels');
-    assert.equal(page.tr('teaching_back'), locale === 'base' ? '关卡' : 'Levels');
+    assert.equal(Object.hasOwn(strings[locale], 'teaching_back'), false);
   }
 });
 

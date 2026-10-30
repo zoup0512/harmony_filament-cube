@@ -495,7 +495,7 @@ struct Index {
         this.getUIContext().showAlertDialog({
           title: this.tr('teaching_leave_title'), message: this.tr('teaching_leave_message'),
           primaryButton: { value: this.tr('keep_playing'), action: () => {} },
-          secondaryButton: { value: this.tr('teaching_back'), action: () => {
+          secondaryButton: { value: this.tr('result_levels'), action: () => {
             if (savedSession === this.sessionId && this.foreground) { this.leaveChallenge(); }
           } }
         });

@@ -2321,6 +2321,8 @@ for (const practiceOrder of [2, 3, 4, 5]) {
     assert.equal(s.onBackPress(), true);
     assert.equal(calls.dialogs[0].title, s.tr('teaching_leave_title'));
     assert.equal(calls.dialogs[0].message, s.tr('teaching_leave_message'));
+    assert.equal(calls.dialogs[0].primaryButton.value, s.tr('keep_playing'));
+    assert.equal(calls.dialogs[0].secondaryButton.value, s.tr('result_levels'));
     calls.dialogs[0].primaryButton.action();
     assert.equal(s.page, 'game');
     assert.equal(s.sessionId, session);

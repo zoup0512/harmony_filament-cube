@@ -409,10 +409,6 @@
       "value": "Return to the same starting position and clear the timer and move count. This does not solve the cube. Saved learning progress is kept."
     },
     {
-      "name": "teaching_back",
-      "value": "Levels"
-    },
-    {
       "name": "teaching_leave_title",
       "value": "Return to levels?"
     },

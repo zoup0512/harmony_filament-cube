@@ -409,10 +409,6 @@
       "value": "回到本关相同的初始局面，重新计时计步，不会自动还原。已保存的教学进度不受影响。"
     },
     {
-      "name": "teaching_back",
-      "value": "关卡"
-    },
-    {
       "name": "teaching_leave_title",
       "value": "返回教学关卡？"
     },
