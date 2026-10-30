@@ -693,6 +693,10 @@
       "value": "Done"
     },
     {
+      "name": "result_levels",
+      "value": "Back to levels"
+    },
+    {
       "name": "result_new_best",
       "value": "New best"
     },

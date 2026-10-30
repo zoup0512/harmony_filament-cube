@@ -173,7 +173,7 @@ test('game page is a fixed layout: header, summary, flexible cube stage, then on
 
 test('teaching levels swap scramble for retry, then next after a pass; the goal opens a sheet', () => {
   const tools = member('gameTools');
-  assert.match(tools, /if \(this\.challengeIndex >= 0\) \{\s*if \(this\.phase === 'solved'\) \{\s*Button\(this\.tr\(this\.challengeIndex === this\.challenges\.length - 1 \? 'teaching_back' : 'teaching_next'\)/);
+  assert.match(tools, /if \(this\.challengeIndex >= 0\) \{\s*if \(this\.phase === 'solved'\) \{\s*Button\(this\.tr\(this\.challengeIndex === this\.challenges\.length - 1 \? 'result_levels' : 'teaching_next'\)/);
   assert.match(tools, /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.nextChallenge\(\)\)/);
   assert.match(buttonBlock('teaching_retry'), /\.enabled\(!this\.busy\)\.onClick\(\(\) => this\.retryChallenge\(\)\)/);
   assert.match(tools, /\} else \{\s*Button\(this\.tr\('scramble'\)/);
@@ -182,7 +182,9 @@ test('teaching levels swap scramble for retry, then next after a pass; the goal 
   wired(header, 'teaching_goal_summary');
   wired(header, 'teaching_level');
   assert.match(header, /\.maxLines\(1\)\.textOverflow\(\{ overflow: TextOverflow\.Ellipsis \}\)/);
-  assert.match(header, /BackButton\(\{ label: \$r\('app\.string\.teaching_back'\)/);
+  assert.match(header, /if \(this\.challengeIndex >= 0\) \{\s*BackButton\(\{ label: \$r\('app\.string\.result_levels'\), onBack: \(\) => this\.goHome\(\) \}\)/);
+  assert.match(header, /\} else \{\s*BackButton\(\{ label: \$r\('app\.string\.return_home'\), onBack: \(\) => this\.goHome\(\) \}\)/);
+  assert.match(components.CubeWidgets, /\.accessibilityText\(this\.label\)/);
   const goal = member('teachingGoal');
   wired(goal, 'teaching_goal_button');
   assert.match(goal, /\.height\(44\)/);

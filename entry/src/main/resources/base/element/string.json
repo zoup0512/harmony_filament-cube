@@ -693,6 +693,10 @@
       "value": "完成"
     },
     {
+      "name": "result_levels",
+      "value": "返回关卡"
+    },
+    {
       "name": "result_new_best",
       "value": "新纪录"
     },

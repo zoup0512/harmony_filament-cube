@@ -163,7 +163,15 @@ test('independent result component resolves every resource in Chinese, shared En
       assert.doesNotMatch(formatted, /%\d+\$[sd]/, `${locale}: unresolved result argument ${key}`);
     }
     assert.deepEqual(Object.keys(strings[locale]).filter(key => key.startsWith('result_')).sort(),
-      ['result_again', 'result_assisted_note', 'result_done', 'result_new_best', 'result_solved']);
+      ['result_again', 'result_assisted_note', 'result_done', 'result_levels', 'result_new_best', 'result_solved']);
+  }
+});
+
+test('return-to-levels actions use explicit copy without changing the shared levels label', () => {
+  for (const locale of locales) {
+    const { page } = harness(locale === 'base' ? 'zh-CN' : locale);
+    assert.equal(page.tr('result_levels'), locale === 'base' ? '返回关卡' : 'Back to levels');
+    assert.equal(page.tr('teaching_back'), locale === 'base' ? '关卡' : 'Levels');
   }
 });
 

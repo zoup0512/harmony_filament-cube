@@ -2746,7 +2746,7 @@ test('teaching result primary action advances to the next level, or returns from
   s.startChallenge(s.challenges.length - 1);
   solveTeaching(h);
   const last = h.calls.resultDialogs.at(-1).options.builder;
-  assert.deepEqual(last.primaryLabel, { resource: 'app.string.teaching_back', args: [] });
+  assert.deepEqual(last.primaryLabel, { resource: 'app.string.result_levels', args: [] });
   last.onPrimary();
   assert.equal(s.page, 'teaching');
   assert.deepEqual(s.navStack.getAllPathName(), ['teaching']);

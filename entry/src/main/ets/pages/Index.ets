@@ -686,7 +686,7 @@ struct Index {
         viewportHeight: this.viewportHeight,
         newBest: !teaching && !this.assisted && this.isNewBest(this.order, this.elapsed),
         primaryLabel: !teaching ? $r('app.string.result_again') :
-          (this.challengeIndex === this.challenges.length - 1 ? $r('app.string.teaching_back') :
+          (this.challengeIndex === this.challenges.length - 1 ? $r('app.string.result_levels') :
             $r('app.string.teaching_next')),
         onPrimary: () => this.resultPrimary(savedSession),
         onDone: () => this.closeSolveResult(savedSession)
@@ -1280,7 +1280,7 @@ struct Index {
   private gameHeader() {
     Row({ space: CubeSpace.s }) {
       if (this.challengeIndex >= 0) {
-        BackButton({ label: $r('app.string.teaching_back'), onBack: () => this.goHome() })
+        BackButton({ label: $r('app.string.result_levels'), onBack: () => this.goHome() })
       } else {
         BackButton({ label: $r('app.string.return_home'), onBack: () => this.goHome() })
       }
@@ -1375,7 +1375,7 @@ struct Index {
     Row({ space: CubeSpace.xs }) {
       if (this.challengeIndex >= 0) {
         if (this.phase === 'solved') {
-          Button(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'teaching_back' : 'teaching_next'),
+          Button(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'result_levels' : 'teaching_next'),
             { type: ButtonType.Normal }).layoutWeight(1).attributeModifier(CubeButtons.primary)
             .enabled(!this.busy).onClick(() => this.nextChallenge())
         } else {
