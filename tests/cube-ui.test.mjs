@@ -259,16 +259,12 @@ test('settings gesture switch shares the handler and explains corner-only hints 
   assert.match(control, /\.onChange\(\(value: boolean\) => this\.setBeginnerGuides\(value\)\)/);
 });
 
-test('home shows the welcome tagline between branding and cube preview, not in settings', () => {
+test('home retains branding and cube preview without the welcome and subtitle block', () => {
   const home = member('homePage');
-  const tagline = "Text(this.tr('home_welcome'))";
-  wired(home, 'home_welcome');
   wired(home, 'brand_name');
-  assert.equal(base.home_welcome, '你的魔方，你的节奏。');
-  assert.equal(english.home_welcome, 'Your cube. Your pace.');
-  assert.equal(source.split(tagline).length - 1, 1, 'show the tagline only once');
-  assert.ok(home.indexOf(tagline) > home.indexOf("Text(this.tr('brand_name'))"));
-  assert.ok(home.indexOf(tagline) < home.indexOf('this.cubeStage()'));
+  assert.match(home, /this\.cubeStage\(\)/);
+  assert.ok(home.indexOf("Text(this.tr('brand_name'))") < home.indexOf('this.cubeStage()'));
+  assert.doesNotMatch(home, /home_welcome|home_subtitle|你的魔方，你的节奏|随时开始一场小小的脑力旅行/);
   assert.doesNotMatch(member('settingsPage'), /home_welcome|你的魔方，你的节奏|MAKE IT YOURS/);
 });
 

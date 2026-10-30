@@ -1052,14 +1052,6 @@ struct Index {
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Blank()
         }.width('100%').height(44)
-        Column({ space: 8 }) {
-          Text(this.tr('home_welcome')).fontSize(26).lineHeight(34)
-            .fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).width('100%')
-          Row({ space: 7 }) {
-            Circle().width(5).height(5).fill(CubeTheme.green)
-            Text(this.tr('home_subtitle')).fontSize(12).fontColor(CubeTheme.secondary)
-          }.width('100%')
-        }.width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
         Column({ space: 0 }) {
           Row() {
             Text(`${this.order} × ${this.order} / ${this.orderDescription(this.order)}`)
