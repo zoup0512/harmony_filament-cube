@@ -72,11 +72,11 @@ test('device idle checks distinguish offscreen controls from disabled animation 
   const controls = enabled => layout(api, [
     element('', 'Canvas', { id: 'cube-base-canvas' }),
     element('打乱', 'Button', { bounds: '[0,1100][400,1200]', enabled }),
-    element('教程', 'Button', { bounds: '[400,1100][900,1200]', enabled })
+    element('复位', 'Button', { bounds: '[400,1100][900,1200]', enabled })
   ]);
   assert.equal(api.idleControls(controls(true)), true, 'offscreen is not busy');
   assert.equal(api.idleControls(controls(false)), false, 'disabled controls still identify animation');
-  assert.equal(api.enabledButton(controls(true), '教程'), false, 'offscreen buttons must not be tappable');
+  assert.equal(api.enabledButton(controls(true), '复位'), false, 'offscreen buttons must not be tappable');
   const omitted = layout(api, [
     element('', 'Canvas', { id: 'cube-base-canvas' }),
     element('正视角', 'Button'),
@@ -112,7 +112,7 @@ test('repeated hints use the first visible hint layout but still reject movement
         element('', 'Canvas', { id: 'cube-guidance-canvas', bounds: repeats ? overlayBounds : canvasBounds }),
         element('', 'Column', {}, [element('用时'), element('00:00.00')]),
         element('', 'Column', {}, [element('步数'), element(undone ? '0' : '1')]),
-        ...['打乱', '教程', '还原提示', '↶ 撤销'].map(text => element(text, 'Button')),
+        ...['打乱', '复位', '还原提示', '撤销'].map(text => element(text, 'Button')),
         ...(hinted && !undone ? [element(hintText)] : [])
       ] };
       return { tree, nodes: api.flatten(tree), viewport: { left: 0, top: 0, right: 1080, bottom: 2406 } };
@@ -239,7 +239,7 @@ test('English observations preserve actual smoke home, game, metrics, order, dia
     element('', 'Column', {}, [element('Moves'), element('17')]),
     ...[2, 3, 4, 5].map(n => element(`${n}×${n}`, 'Button', { backgroundColor: n === 4 ? 'green' : 'white' })),
     element('', 'Button', { description: 'Solve hint' }),
-    element('', 'Button', { originalText: '↶ Undo' })]);
+    element('', 'Button', { originalText: 'Undo' })]);
   assert.equal(api.isGame(state, 4), true);
   assert.equal(api.moves(state), 17);
   assert.equal(api.timer(state), '00:12.34');

@@ -5,14 +5,19 @@ import { TeachingChallenge, createTeachingChallenges } from '../model/CubeTeachi
 import { CubeRenderer } from '../render/CubeRenderer';
 import { CubeStore, CubeSettings, SolveRecord, TeachingRecord } from '../storage/CubeStore';
 import { CubeFeedback } from '../platform/CubeFeedback';
-import { CubeTheme } from './CubeTheme';
+import { CubeFont, CubeLayout, CubeRadius, CubeSpace, CubeTheme } from './CubeTheme';
+import { CubeButtons } from './CubeStyles';
 import { SolveResult } from '../model/SolveResult';
 import { SolveResultDialog } from './SolveResultDialog';
+import { BackButton, BrandMark, ChartMark, OrderSelector } from '../components/CubeWidgets';
+import { StatsOrderRow, StatsPage, StatsRecentRow } from '../components/StatsPage';
+import { TeachingGroup, TeachingItem, TeachingPage } from '../components/TeachingPage';
+import { SettingsPage } from '../components/SettingsPage';
 
 @Entry
 @Component
 struct Index {
-  @State private page: string = 'home';
+  @State @Watch('syncNav') private page: string = 'home';
   @State private order: number = 3;
   @State private phase: string = 'idle';
   @State private busy: boolean = false;
@@ -33,6 +38,9 @@ struct Index {
   @State private storageWarning: string = '';
   @State private assisted: boolean = false;
   @State private viewportHeight: number = 740;
+  @State private viewportWidth: number = 360;
+  @State private goalVisible: boolean = false;
+  @State private stageMin: number = 240;
   @State private solveResult: SolveResult = new SolveResult();
   private resultVisible: boolean = false;
   private resultDialog: CustomDialogController | null = null;
@@ -55,7 +63,9 @@ struct Index {
   private guidanceWidth: number = 0;
   private guidanceHeight: number = 0;
   private guidanceDirty: boolean = true;
-  private gameScroller: Scroller = new Scroller();
+  private navStack: NavPathStack = new NavPathStack();
+  private canvasOwner: string = '';
+  private guidanceOwner: string = '';
   private canvasWidth: number = 320;
   private canvasHeight: number = 320;
   private canvasReady: boolean = false;
@@ -121,6 +131,22 @@ struct Index {
       return true;
     }
     return false;
+  }
+
+  // The navigation stack mirrors `page`: teaching levels sit above the catalogue, every
+  // other page sits directly above home. Common prefixes are kept so back stays natural.
+  private syncNav(): void {
+    const target: string[] = this.page === 'home' ? [] :
+      (this.page === 'game' && this.challengeIndex >= 0 ? ['teaching', 'game'] : [this.page]);
+    const current: string[] = this.navStack.getAllPathName();
+    let same = 0;
+    while (same < current.length && same < target.length && current[same] === target[same]) { same++; }
+    if (same === current.length && same === target.length) { return; }
+    if (same < current.length) {
+      if (same === 0) { this.navStack.clear(target.length === 0); }
+      else { this.navStack.popToIndex(same - 1, target.length === same); }
+    }
+    for (let i = same; i < target.length; i++) { this.navStack.pushPathByName(target[i], null, true); }
   }
 
   private tr(name: string, ...args: Array<string | number>): string {
@@ -370,8 +396,7 @@ struct Index {
       index < 0 || index >= this.challenges.length ||
       (this.page !== 'teaching' && (this.page !== 'game' || this.challengeIndex < 0))) { return; }
     const challenge = this.challenges[index];
-    const mounted = this.page === 'game';
-    const ready = mounted && this.canvasReady;
+    const ready = this.page === 'game' && this.canvasReady;
     this.canvasReady = false;
     this.order = challenge.order;
     this.resetSession();
@@ -384,7 +409,6 @@ struct Index {
     this.setHint('teaching_start_hint');
     this.page = 'game';
     this.canvasReady = ready;
-    if (mounted) { this.gameScroller.scrollTo({ xOffset: 0, yOffset: 0 }); }
     this.draw();
   }
 
@@ -431,6 +455,12 @@ struct Index {
     return record === undefined ? '' : this.tr('teaching_best', record.moves, this.formatTime(record.durationMs));
   }
 
+  private teachingKind(challenge: TeachingChallenge): string {
+    const record = this.teachingRecords.find((item: TeachingRecord) => item.challengeId === challenge.id);
+    if (record === undefined) { return 'new'; }
+    return record.assisted ? 'guided' : 'solved';
+  }
+
   private chooseOrder(value: number): void {
     this.order = value;
     this.resetSession();
@@ -465,7 +495,7 @@ struct Index {
         this.getUIContext().showAlertDialog({
           title: this.tr('teaching_leave_title'), message: this.tr('teaching_leave_message'),
           primaryButton: { value: this.tr('keep_playing'), action: () => {} },
-          secondaryButton: { value: this.tr('teaching_back'), action: () => {
+          secondaryButton: { value: this.tr('result_levels'), action: () => {
             if (savedSession === this.sessionId && this.foreground) { this.leaveChallenge(); }
           } }
         });
@@ -617,15 +647,10 @@ struct Index {
     }
   }
 
-  private startLesson(): void {
-    if (this.busy || this.challengeIndex >= 0) { return; }
-    if (this.phase === 'playing' || this.phase === 'ready') {
-      this.getUIContext().showAlertDialog({
-        title: this.tr('lesson_title'), message: this.tr('lesson_message'),
-        primaryButton: { value: this.tr('cancel'), action: () => {} },
-        secondaryButton: { value: this.tr('start_lesson'), action: () => this.doLesson() }
-      });
-    } else { this.doLesson(); }
+  private startTutorial(): void {
+    if (!this.loaded || !this.foreground || this.page !== 'home') { return; }
+    this.startGame();
+    this.doLesson();
   }
 
   private doLesson(): void {
@@ -650,6 +675,7 @@ struct Index {
     if (this.page !== 'game' || this.phase !== 'solved' || this.busy || !this.foreground ||
       this.solveResult.sessionId === this.sessionId) { return; }
     const savedSession = this.sessionId;
+    const teaching = this.challengeIndex >= 0;
     this.solveResult = new SolveResult(savedSession, this.order, this.elapsed, this.moves,
       this.challengeIndex, this.assisted);
     this.invalidateGesture();
@@ -657,13 +683,19 @@ struct Index {
     this.resultDialog = new CustomDialogController({
       builder: SolveResultDialog({
         result: this.solveResult,
-        viewportHeight: this.viewportHeight
+        viewportHeight: this.viewportHeight,
+        newBest: !teaching && !this.assisted && this.isNewBest(this.order, this.elapsed),
+        primaryLabel: !teaching ? $r('app.string.result_again') :
+          (this.challengeIndex === this.challenges.length - 1 ? $r('app.string.result_levels') :
+            $r('app.string.teaching_next')),
+        onPrimary: () => this.resultPrimary(savedSession),
+        onDone: () => this.closeSolveResult(savedSession)
       }),
       alignment: DialogAlignment.Center,
       customStyle: true,
       autoCancel: true,
       isModal: true,
-      maskColor: '#66182D2A',
+      maskColor: CubeTheme.scrim,
       openAnimation: { duration: 180, curve: Curve.EaseOut },
       closeAnimation: { duration: 120, curve: Curve.EaseIn },
       onWillDismiss: (action: DismissDialogAction) => {
@@ -674,6 +706,17 @@ struct Index {
       }
     });
     this.resultDialog.open();
+  }
+
+  private isNewBest(order: number, durationMs: number): boolean {
+    return !this.records.some((record: SolveRecord) => record.order === order && record.durationMs <= durationMs);
+  }
+
+  private resultPrimary(savedSession: number): void {
+    if (savedSession !== this.sessionId || savedSession !== this.solveResult.sessionId) { return; }
+    const teaching = this.challengeIndex >= 0;
+    this.closeSolveResult(savedSession);
+    if (teaching) { this.nextChallenge(); } else { this.doScramble(); }
   }
 
   private closeSolveResult(savedSession: number = this.sessionId): void {
@@ -947,14 +990,56 @@ struct Index {
     return this.tr('phase_idle');
   }
 
+  private teachingGroups(): TeachingGroup[] {
+    const groups: TeachingGroup[] = [];
+    this.challenges.forEach((challenge: TeachingChallenge, index: number) => {
+      let group: TeachingGroup | undefined = groups.find((item: TeachingGroup) => item.order === challenge.order);
+      if (group === undefined) {
+        group = new TeachingGroup(challenge.order);
+        groups.push(group);
+      }
+      group.items.push(new TeachingItem(index, challenge.id, this.tr(challenge.titleKey),
+        this.tr('teaching_level_details', challenge.order, challenge.referenceMoves), this.tr(challenge.descriptionKey),
+        this.tr(challenge.difficulty === 1 ? 'teaching_difficulty_1' :
+          (challenge.difficulty === 2 ? 'teaching_difficulty_2' : 'teaching_difficulty_3')),
+        this.teachingStatus(challenge), this.teachingKind(challenge), this.teachingBest(challenge)));
+    });
+    return groups;
+  }
+
+  private statsRows(): StatsOrderRow[] {
+    return this.orders.map((value: number) => new StatsOrderRow(value, this.tr('order_label', value),
+      this.orderDescription(value), this.tr('completed_count', this.orderSolves(value)), this.bestTime(value),
+      this.orderSolves(value) > 0));
+  }
+
+  private recentRows(): StatsRecentRow[] {
+    // Exactly one "best" badge per size, even when two results share the same time.
+    const best: Map<number, number> = new Map<number, number>();
+    this.records.forEach((record: SolveRecord, index: number) => {
+      const current = best.get(record.order);
+      if (current === undefined || record.durationMs < this.records[current].durationMs) { best.set(record.order, index); }
+    });
+    return this.records.slice(0, 20).map((record: SolveRecord, index: number) => new StatsRecentRow(
+      `${record.date}-${index}`, this.tr('order_label', record.order), this.formatTime(record.durationMs),
+      this.tr('record_details', record.moves, this.dateLabel(record.date)), best.get(record.order) === index));
+  }
+
+  private trendBars(): number[] {
+    const times = this.records.filter((record: SolveRecord) => record.order === this.order).slice(0, 10)
+      .map((record: SolveRecord) => record.durationMs).reverse();
+    const longest = times.reduce((max: number, value: number) => Math.max(max, value), 0);
+    return times.map((value: number) => longest > 0 ? value / longest : 0);
+  }
+
   @Builder
-  private cubeCanvas() {
+  private cubeCanvas(owner: string) {
     Canvas(this.context2d)
       .id('cube-base-canvas')
       .width('100%')
       .height('100%')
-      .onReady(() => { this.canvasReady = true; this.resetGuide(); this.draw(); })
-      .onDisAppear(() => { this.canvasReady = false; this.clearGuidance(); this.resetGuide(); })
+      .onReady(() => { this.canvasOwner = owner; this.canvasReady = true; this.resetGuide(); this.draw(); })
+      .onDisAppear(() => { if (this.canvasOwner === owner) { this.canvasReady = false; this.clearGuidance(); this.resetGuide(); } })
       .onAreaChange((_old: Area, area: Area) => {
         this.invalidateGesture();
         this.canvasWidth = Number(area.width);
@@ -966,15 +1051,15 @@ struct Index {
   }
 
   @Builder
-  private guidanceCanvas() {
+  private guidanceCanvas(owner: string) {
     Canvas(this.guidanceContext)
       .id('cube-guidance-canvas')
       .width('100%')
       .height('100%')
       .hitTestBehavior(HitTestMode.None)
       .accessibilityLevel('no')
-      .onReady(() => { this.guidanceReady = true; this.resetGuide(); this.drawGuidance(); })
-      .onDisAppear(() => { this.clearGuidance(); this.guidanceReady = false; this.resetGuide(); })
+      .onReady(() => { this.guidanceOwner = owner; this.guidanceReady = true; this.resetGuide(); this.drawGuidance(); })
+      .onDisAppear(() => { if (this.guidanceOwner === owner) { this.clearGuidance(); this.guidanceReady = false; this.resetGuide(); } })
       .onAreaChange((_old: Area, area: Area) => {
         this.clearGuidance();
         this.guidanceWidth = Number(area.width);
@@ -996,537 +1081,415 @@ struct Index {
   }
 
   @Builder
-  private sectionTitle(kickerKey: string, titleKey: string) {
-    Column({ space: 8 }) {
-      Text(this.tr(kickerKey)).fontSize(10).fontColor(CubeTheme.green).letterSpacing(2).fontWeight(FontWeight.Medium)
-      Text(this.tr(titleKey)).fontSize(27).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-    }.width('100%').alignItems(HorizontalAlign.Start)
-  }
-
-  @Builder
-  private brandMark() {
-    Column({ space: 3 }) {
-      Row({ space: 3 }) {
-        Rect().width(8).height(8).radius(2).fill(CubeTheme.accent)
-        Rect().width(8).height(8).radius(2).fill('#FFFFFF')
-      }
-      Row({ space: 3 }) {
-        Rect().width(8).height(8).radius(2).fill('#FFFFFF')
-        Rect().width(8).height(8).radius(2).fill(CubeTheme.accent)
-      }
-    }.width(36).height(36).justifyContent(FlexAlign.Center).backgroundColor(CubeTheme.ink).borderRadius(12)
-      .accessibilityLevel('no')
-  }
-
-  @Builder
-  private chartMark(size: number, color: string) {
-    Row({ space: 3 }) {
-      Rect().width(size * 0.22).height(size * 0.45).radius(2).fill(color)
-      Rect().width(size * 0.22).height(size * 0.85).radius(2).fill(color)
-      Rect().width(size * 0.22).height(size * 0.65).radius(2).fill(color)
-    }.width(size).height(size).alignItems(VerticalAlign.Bottom).accessibilityLevel('no')
-  }
-
-  @Builder
-  private cubeStage() {
+  private cubeStage(owner: string) {
     Stack() {
-      Circle().width(194).height(194).fill(Color.Transparent)
-        .stroke('#CFDDCE').strokeWidth(1).hitTestBehavior(HitTestMode.None)
-      Circle().width(158).height(158).fill('#DEE9DA').hitTestBehavior(HitTestMode.None)
-      this.cubeCanvas()
-      this.guidanceCanvas()
+      Column().width(this.stageMin * 0.86).height(this.stageMin * 0.86).borderRadius(this.stageMin * 0.43)
+        .border({ width: 1, color: CubeTheme.stageRing }).hitTestBehavior(HitTestMode.None)
+      Column().width(this.stageMin * 0.7).height(this.stageMin * 0.7).borderRadius(this.stageMin * 0.35)
+        .backgroundColor(CubeTheme.stageDisc).hitTestBehavior(HitTestMode.None)
+      this.cubeCanvas(owner)
+      this.guidanceCanvas(owner)
     }.width('100%').height('100%')
-      .linearGradient({ angle: 135, colors: [['#EFF4E7', 0], ['#E1ECE2', 1]] })
+      .linearGradient({ angle: 135, colors: [[CubeTheme.stageStart, 0], [CubeTheme.stageEnd, 1]] })
       .borderRadius(28).clip(true)
+      .onAreaChange((_old: Area, area: Area) => {
+        this.stageMin = Math.min(Number(area.width), Number(area.height));
+      })
+  }
+
+  @Builder
+  private homeTile(labelKey: string, page: string) {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 10 }) {
+        if (page === 'stats') {
+          ChartMark({ markSize: 19, color: CubeTheme.green })
+        } else {
+          SymbolGlyph($r('sys.symbol.gearshape')).fontSize(19).fontColor([CubeTheme.green])
+        }
+        Text(this.tr(labelKey)).fontSize(CubeFont.label).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
+          .layoutWeight(1).maxLines(2)
+        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([CubeTheme.secondary])
+          .accessibilityLevel('no')
+      }.width('100%').padding(14)
+    }.layoutWeight(1).constraintSize({ minHeight: 52 }).padding(0).borderRadius(CubeRadius.l)
+      .backgroundColor(CubeTheme.surface).clickEffect({ level: ClickEffectLevel.LIGHT })
+      .id(`home-${page}`).accessibilityText(this.tr(labelKey))
+      .onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = page; })
   }
 
   @Builder
   private homePage() {
     Scroll() {
-      Column({ space: 16 }) {
+      Column({ space: CubeSpace.m }) {
         Row({ space: 10 }) {
-          this.brandMark()
+          BrandMark()
           Column({ space: 2 }) {
-            Text(this.tr('brand_name')).fontSize(12).letterSpacing(1.5).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-            Text(this.tr('brand_tagline')).fontSize(10).fontColor(CubeTheme.secondary)
+            Text(this.tr('brand_name')).fontSize(CubeFont.label).letterSpacing(1.5).fontWeight(FontWeight.Bold)
+              .fontColor(CubeTheme.ink)
+            Text(this.tr('brand_tagline')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Blank()
         }.width('100%').height(44)
-        Column({ space: 0 }) {
+        Column() {
           Row() {
             Text(`${this.order} × ${this.order} / ${this.orderDescription(this.order)}`)
-              .fontSize(11).fontColor(CubeTheme.green).fontWeight(FontWeight.Medium)
+              .fontSize(CubeFont.caption).fontColor(CubeTheme.green).fontWeight(FontWeight.Medium)
             Blank()
-            Text(this.tr('interactive_preview')).fontSize(10).fontColor(CubeTheme.secondary)
+            Text(this.tr('interactive_preview')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
           }.width('100%').padding({ left: 18, right: 18, top: 15 })
           Stack() {
-            this.cubeStage()
-          }.width('100%').height(202)
-          Text(this.tr('preview_help')).fontSize(10).fontColor(CubeTheme.secondary)
+            // Only one cube canvas may be bound to the shared 2D context at a time.
+            if (this.page === 'home') {
+              this.cubeStage('home')
+            }
+          }.width('100%').height(220)
+          Text(this.tr('preview_help')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
             .padding({ bottom: 14 })
         }.width('100%').backgroundColor(CubeTheme.mint).borderRadius(28).clip(true)
-        Column({ space: 12 }) {
+        Column({ space: CubeSpace.s }) {
           Row() {
-            Text(this.tr('choose_challenge')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            Text(this.tr('choose_challenge')).fontSize(CubeFont.subhead).fontWeight(FontWeight.Bold)
+              .fontColor(CubeTheme.ink)
             Blank()
-            Text('02 — 05').fontSize(10).fontColor(CubeTheme.muted).letterSpacing(1)
+            Text('02 — 05').fontSize(CubeFont.caption).fontColor(CubeTheme.muted).letterSpacing(1)
+              .accessibilityLevel('no')
           }.width('100%')
-          Row({ space: 8 }) {
-            ForEach(this.orders, (value: number) => {
-              Button(this.tr('order_label', value), { type: ButtonType.Normal })
-                .layoutWeight(1).height(48).borderRadius(16).fontSize(16).fontWeight(FontWeight.Medium)
-                .backgroundColor(this.order === value ? CubeTheme.ink : CubeTheme.surface)
-                .fontColor(this.order === value ? CubeTheme.accent : CubeTheme.secondary)
-                .border({ width: 1, color: this.order === value ? CubeTheme.ink : CubeTheme.line, radius: 16 })
-                .accessibilityText(this.tr('order_accessibility', value, this.order === value ? this.tr('selected_suffix') : ''))
-                .onClick(() => this.chooseOrder(value))
-            })
-          }.width('100%')
+          OrderSelector({ selected: this.order, orders: this.orders,
+            onSelect: (value: number) => this.chooseOrder(value) })
         }.width('100%')
-        Button(this.tr('start_game'), { type: ButtonType.Normal }).width('100%').height(56)
-          .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Bold)
-          .borderRadius(18).enabled(this.loaded).onClick(() => this.startGame())
-        Button(this.tr('teaching_entry_title'), { type: ButtonType.Normal }).width('100%').height(56)
-          .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.ink).fontSize(17).fontWeight(FontWeight.Bold)
-          .borderRadius(18).enabled(this.loaded).onClick(() => this.openTeaching())
+        Button({ type: ButtonType.Normal }) {
+          Row({ space: CubeSpace.xs }) {
+            Text(this.tr('start_game')).fontSize(CubeFont.headline).fontWeight(FontWeight.Bold)
+              .fontColor(CubeTheme.onAccent)
+            SymbolGlyph($r('sys.symbol.arrow_right')).fontSize(20).fontColor([CubeTheme.onAccent])
+          }
+        }.width('100%').attributeModifier(CubeButtons.hero).enabled(this.loaded).id('home-start')
+          .accessibilityText(this.tr('start_game')).onClick(() => this.startGame())
+        Button({ type: ButtonType.Normal }) {
+          Row({ space: CubeSpace.s }) {
+            Stack() {
+              SymbolGlyph($r('sys.symbol.graduationcap')).fontSize(22).fontColor([CubeTheme.green])
+            }.width(44).height(44).backgroundColor(CubeTheme.mint).borderRadius(CubeRadius.m)
+            Column({ space: 6 }) {
+              Text(this.tr('teaching')).fontSize(CubeFont.subhead).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+              Row({ space: CubeSpace.xs }) {
+                Progress({ value: this.teachingRecords.length, total: this.challenges.length, type: ProgressType.Linear })
+                  .layoutWeight(1).color(CubeTheme.green).backgroundColor(CubeTheme.line).style({ strokeWidth: 4 })
+                Text(this.tr('teaching_progress', this.teachingRecords.length, this.challenges.length))
+                  .fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
+              }.width('100%')
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(18).fontColor([CubeTheme.secondary])
+              .accessibilityLevel('no')
+          }.width('100%').padding(CubeSpace.s)
+        }.width('100%').padding(0).borderRadius(CubeRadius.l).backgroundColor(CubeTheme.surface)
+          .clickEffect({ level: ClickEffectLevel.LIGHT }).enabled(this.loaded).id('home-teaching')
+          .accessibilityText(this.tr('teaching') + ' · ' +
+            this.tr('teaching_progress', this.teachingRecords.length, this.challenges.length))
+          .onClick(() => this.openTeaching())
         Row({ space: 10 }) {
-          Button({ type: ButtonType.Normal }) {
-            Row({ space: 10 }) {
-              this.chartMark(19, CubeTheme.green)
-              Text(this.tr('statistics')).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-              Blank()
-              Text('↗').fontSize(17).fontColor(CubeTheme.secondary)
-            }.width('100%').padding(14)
-          }.layoutWeight(1).height(52).borderRadius(16).backgroundColor(CubeTheme.surface)
-            .accessibilityText(this.tr('statistics')).onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'stats'; })
-          Button({ type: ButtonType.Normal }) {
-            Row({ space: 10 }) {
-              SymbolGlyph($r('sys.symbol.gearshape')).fontSize(19).fontColor([CubeTheme.green])
-              Text(this.tr('settings')).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-              Blank()
-              Text('↗').fontSize(17).fontColor(CubeTheme.secondary)
-            }.width('100%').padding(14)
-          }.layoutWeight(1).height(52).borderRadius(16).backgroundColor(CubeTheme.surface)
-            .accessibilityText(this.tr('settings')).onClick(() => { this.invalidateGesture(); this.canvasReady = false; this.page = 'settings'; })
+          this.homeTile('statistics', 'stats')
+          this.homeTile('settings', 'settings')
         }.width('100%')
+        Button({ type: ButtonType.Normal }) {
+          Row({ space: CubeSpace.xxs }) {
+            SymbolGlyph($r('sys.symbol.hand_tap')).fontSize(16).fontColor([CubeTheme.green])
+            Text(this.tr('home_tutorial_link')).fontSize(CubeFont.label).fontWeight(FontWeight.Medium)
+              .fontColor(CubeTheme.green)
+            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([CubeTheme.green])
+          }
+        }.backgroundColor(Color.Transparent).constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12 })
+          .enabled(this.loaded).id('home-tutorial').accessibilityText(this.tr('home_tutorial_link'))
+          .onClick(() => this.startTutorial())
         Text(this.storageWarning.length > 0 ? this.storageWarning : this.tr('offline_footer'))
-          .fontSize(10).fontColor(CubeTheme.secondary).textAlign(TextAlign.Center)
+          .fontSize(CubeFont.caption).fontColor(this.storageWarning.length > 0 ? CubeTheme.danger : CubeTheme.secondary)
+          .textAlign(TextAlign.Center)
       }.width('100%').constraintSize({ maxWidth: 520 }).padding({ left: 22, right: 22, top: 12, bottom: 22 })
-    }.width('100%').height('100%').scrollBar(BarState.Off)
+    }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
       .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer) =>
         this.judgeScrollGesture(current))
   }
 
   @Builder
-  private backButton(compact: boolean = false) {
-    Button({ type: ButtonType.Circle }) {
-      Stack({ alignContent: Alignment.Center }) {
-        Circle().width(compact ? 36 : 44).height(compact ? 36 : 44)
-          .fill(CubeTheme.surface).stroke(CubeTheme.line).strokeWidth(1)
-        SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(compact ? 24 : 20).fontColor([CubeTheme.ink])
-      }.width(44).height(44)
-    }.width(44).height(44).padding(0)
-      .backgroundColor(Color.Transparent)
-      .id('back-button')
-      .accessibilityText(this.tr(this.challengeIndex >= 0 ? 'teaching_back' : 'return_home')).onClick(() => this.goHome())
-  }
-
-  @Builder
-  private header(titleKey: string, compactBack: boolean = false) {
-    Row({ space: 12 }) {
-      this.backButton(compactBack)
-      Text(this.tr(titleKey)).fontSize(17).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).layoutWeight(1)
-    }.width('100%').height(48)
-  }
-
-  @Builder
-  private teachingPage() {
-    Column({ space: 18 }) {
-      this.header('teaching')
-      Scroll() {
-        Column({ space: 16 }) {
-          this.sectionTitle('teaching_kicker', 'teaching_title')
-          Text(this.tr('teaching_description')).fontSize(13).lineHeight(21).fontColor(CubeTheme.secondary).width('100%')
-          Column({ space: 10 }) {
-            Text(this.tr('teaching_progress', this.teachingRecords.length, this.challenges.length))
-              .fontSize(20).fontWeight(FontWeight.Bold).fontColor(CubeTheme.accent)
-            Text(this.tr('teaching_rules')).fontSize(11).lineHeight(19).fontColor('#DCE6DF')
-          }.width('100%').alignItems(HorizontalAlign.Start).padding(20).backgroundColor(CubeTheme.ink).borderRadius(24)
-          ForEach(this.challenges, (challenge: TeachingChallenge, index: number) => {
-            Button({ type: ButtonType.Normal }) {
-              Column({ space: 11 }) {
-                Row({ space: 10 }) {
-                  Text((index + 1).toString().padStart(2, '0')).fontSize(19).fontWeight(FontWeight.Bold)
-                    .fontColor(CubeTheme.green).width(46).height(46).textAlign(TextAlign.Center)
-                    .backgroundColor(CubeTheme.mint).borderRadius(14)
-                  Column({ space: 5 }) {
-                    Text(this.tr(challenge.titleKey)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-                    Text(this.tr('teaching_level_details', challenge.order, challenge.referenceMoves))
-                      .fontSize(11).lineHeight(17).fontColor(CubeTheme.secondary)
-                  }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  Text('›').fontSize(25).fontColor(CubeTheme.green).accessibilityLevel('no')
-                }.width('100%')
-                Text(this.tr(challenge.descriptionKey)).fontSize(12).lineHeight(20).fontColor(CubeTheme.secondary).width('100%')
-                Row({ space: 8 }) {
-                  Text(this.tr(challenge.difficulty === 1 ? 'teaching_difficulty_1' :
-                    (challenge.difficulty === 2 ? 'teaching_difficulty_2' : 'teaching_difficulty_3')))
-                    .fontSize(10).fontColor(CubeTheme.green)
-                    .padding({ left: 9, right: 9, top: 5, bottom: 5 }).backgroundColor(CubeTheme.mint).borderRadius(8)
-                  Text(this.teachingStatus(challenge)).fontSize(11).fontColor(CubeTheme.green).layoutWeight(1)
-                    .textAlign(TextAlign.End)
-                }.width('100%')
-                if (this.teachingBest(challenge).length > 0) {
-                  Text(this.teachingBest(challenge)).fontSize(11).fontColor(CubeTheme.secondary).width('100%')
-                }
-              }.width('100%').padding(18).alignItems(HorizontalAlign.Start)
-            }.width('100%').padding(0).borderRadius(22).backgroundColor(CubeTheme.surface)
-              .enabled(this.loaded).onClick(() => this.startChallenge(index))
-          }, (challenge: TeachingChallenge) => challenge.id)
-          if (this.storageWarning.length > 0) {
-            Text(this.storageWarning).fontSize(11).lineHeight(18).fontColor(CubeTheme.danger).width('100%')
-          }
-        }.width('100%').padding({ bottom: 24 })
-      }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
-    }.width('100%').height('100%').constraintSize({ maxWidth: 600 }).padding({ left: 22, right: 22, top: 10 })
+  private teachingGoal() {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: CubeSpace.xxs }) {
+        SymbolGlyph($r('sys.symbol.info_circle')).fontSize(16).fontColor([CubeTheme.green])
+        Text(this.tr('teaching_goal_button')).fontSize(CubeFont.label).fontColor(CubeTheme.green).maxLines(1)
+      }
+    }.height(44).padding({ left: 10, right: 10 }).borderRadius(CubeRadius.m).backgroundColor(CubeTheme.mint)
+      .clickEffect({ level: ClickEffectLevel.LIGHT }).id('game-goal')
+      .accessibilityText(this.tr('teaching_goal_details'))
+      .onClick(() => this.showTeachingGoal())
   }
 
   private showTeachingGoal(): void {
     if (!this.foreground || this.page !== 'game' || this.challengeIndex < 0 ||
       this.challengeIndex >= this.challenges.length) { return; }
-    const challenge = this.challenges[this.challengeIndex];
-    this.getUIContext().showAlertDialog({
-      title: this.tr('teaching_level', this.challengeIndex + 1) + ' · ' + this.tr(challenge.titleKey),
-      message: this.tr('teaching_goal_summary') + '\n\n' + this.tr(challenge.tipKey) + '\n\n' +
-        this.tr('teaching_level_details', this.order, challenge.referenceMoves) + '\n\n' +
-        this.tr('teaching_start_hint') + '\n\n' + this.tr('teaching_hint_note'),
-      primaryButton: { value: this.tr('teaching_goal_close'), action: () => {} }
-    });
+    this.invalidateGesture();
+    this.goalVisible = true;
   }
 
   @Builder
-  private teachingGoal() {
-    Button(this.tr('teaching_goal_button'), { type: ButtonType.Normal }).width(52).height(44).borderRadius(12)
-      .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(12)
-      .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 1 })
-      .accessibilityText(this.tr('teaching_goal_details'))
-      .onClick(() => this.showTeachingGoal())
+  private goalSheet() {
+    Scroll() {
+      Column({ space: CubeSpace.m }) {
+        if (this.challengeIndex >= 0 && this.challengeIndex < this.challenges.length) {
+          Text(this.tr('teaching_level', this.challengeIndex + 1) + ' · ' +
+            this.tr(this.challenges[this.challengeIndex].titleKey))
+            .fontSize(CubeFont.headline).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink).width('100%')
+          Text(this.tr('teaching_goal_summary')).fontSize(CubeFont.body).fontWeight(FontWeight.Medium)
+            .fontColor(CubeTheme.green).padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(CubeTheme.mint).borderRadius(CubeRadius.s)
+          Column({ space: CubeSpace.xxs }) {
+            Text(this.tr('teaching_goal_tip')).fontSize(CubeFont.caption).fontWeight(FontWeight.Medium)
+              .fontColor(CubeTheme.secondary)
+            Text(this.tr(this.challenges[this.challengeIndex].tipKey)).fontSize(CubeFont.body).lineHeight(21)
+              .fontColor(CubeTheme.ink).width('100%')
+          }.width('100%').alignItems(HorizontalAlign.Start)
+          Column({ space: CubeSpace.xxs }) {
+            Text(this.tr('teaching_goal_reference')).fontSize(CubeFont.caption).fontWeight(FontWeight.Medium)
+              .fontColor(CubeTheme.secondary)
+            Text(this.tr('teaching_level_details', this.order, this.challenges[this.challengeIndex].referenceMoves))
+              .fontSize(CubeFont.body).lineHeight(21).fontColor(CubeTheme.ink).width('100%')
+            Text(this.tr('teaching_start_hint')).fontSize(CubeFont.body).lineHeight(21).fontColor(CubeTheme.ink)
+              .width('100%')
+          }.width('100%').alignItems(HorizontalAlign.Start)
+          Column({ space: CubeSpace.xxs }) {
+            Text(this.tr('teaching_goal_rules')).fontSize(CubeFont.caption).fontWeight(FontWeight.Medium)
+              .fontColor(CubeTheme.secondary)
+            Text(this.tr('teaching_hint_note')).fontSize(CubeFont.body).lineHeight(21).fontColor(CubeTheme.ink)
+              .width('100%')
+          }.width('100%').alignItems(HorizontalAlign.Start)
+          Button(this.tr('teaching_goal_close'), { type: ButtonType.Normal }).width('100%')
+            .attributeModifier(CubeButtons.primary).id('goal-close').onClick(() => { this.goalVisible = false; })
+        }
+      }.width('100%').padding({ left: CubeSpace.l, right: CubeSpace.l, top: CubeSpace.xs, bottom: CubeSpace.xl })
+      .alignItems(HorizontalAlign.Start)
+    }.width('100%').scrollBar(BarState.Off).align(Alignment.Top).id('goal-sheet')
   }
 
   @Builder
-  private teachingControls() {
-    Column({ space: 10 }) {
-      if (this.phase === 'solved') {
-        Text(this.tr(this.assisted ? 'teaching_passed_guided' : 'teaching_passed'))
-          .fontSize(19).fontWeight(FontWeight.Bold).fontColor(CubeTheme.green).width('100%')
-        Text(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'teaching_all_complete' : 'teaching_completed_note'))
-          .fontSize(11).lineHeight(18).fontColor(CubeTheme.secondary).width('100%')
-        Button(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'teaching_back' : 'teaching_next'),
-          { type: ButtonType.Normal }).width('100%').height(48).borderRadius(14).fontSize(15)
-          .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontWeight(FontWeight.Bold)
-          .enabled(!this.busy).onClick(() => this.nextChallenge())
+  private gameHeader() {
+    Row({ space: CubeSpace.s }) {
+      if (this.challengeIndex >= 0) {
+        BackButton({ label: $r('app.string.result_levels'), onBack: () => this.goHome() })
+      } else {
+        BackButton({ label: $r('app.string.return_home'), onBack: () => this.goHome() })
       }
-    }.width('100%')
+      Column({ space: 3 }) {
+        if (this.challengeIndex >= 0) {
+          Text(this.tr('teaching_level', this.challengeIndex + 1) + ' · ' +
+            this.tr(this.challenges[this.challengeIndex].titleKey))
+            .fontSize(CubeFont.headline - 1).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        } else {
+          Text(this.tr('cube_title', this.order)).fontSize(CubeFont.headline - 1).fontWeight(FontWeight.Bold)
+            .fontColor(CubeTheme.ink)
+        }
+        Row({ space: 5 }) {
+          Column().width(6).height(6).borderRadius(3)
+            .backgroundColor(this.phase === 'playing' ? CubeTheme.accent : CubeTheme.green)
+            .border({ width: this.phase === 'playing' ? 1 : 0, color: CubeTheme.green })
+          Text(this.phaseLabel()).fontSize(CubeFont.caption).fontColor(CubeTheme.green)
+          if (this.challengeIndex >= 0) {
+            Text(this.tr('teaching_goal_summary')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          }
+        }.width('100%')
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      if (this.challengeIndex >= 0) {
+        this.teachingGoal()
+      }
+    }.width('100%').constraintSize({ minHeight: CubeLayout.touchTarget }).id('game-header')
+  }
+
+  @Builder
+  private gameSummary() {
+    Row() {
+      Column({ space: 3 }) {
+        Text(this.tr('elapsed_time')).fontSize(CubeFont.caption).fontColor(CubeTheme.onHeroMuted)
+        Text(this.formatTime(this.elapsed)).fontFamily('monospace').fontSize(26)
+          .fontWeight(FontWeight.Medium).fontColor(CubeTheme.onHero).maxLines(1)
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Column({ space: 3 }) {
+        Text(this.tr('move_count')).fontSize(CubeFont.caption).fontColor(CubeTheme.onHeroMuted)
+        Text(`${this.moves}`).fontSize(26).fontWeight(FontWeight.Medium).fontColor(CubeTheme.accent)
+      }.alignItems(HorizontalAlign.End).constraintSize({ minWidth: 48 })
+    }.width('100%').padding({ left: 18, right: 18, top: 10, bottom: 10 })
+      .backgroundColor(CubeTheme.hero).borderRadius(20).id('game-summary')
+  }
+
+  @Builder
+  private gameStage(owner: string) {
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.cubeStage(owner)
+      // Overlays never resize the cube: hints let touches through, view tools sit in a corner.
+      Column() {
+        if (this.hint.length > 0 && this.hintKey !== 'teaching_start_hint') {
+          Text(this.hint).fontSize(CubeFont.label).lineHeight(19).fontColor(CubeTheme.green)
+            .width('100%').padding(CubeSpace.s).backgroundColor(CubeTheme.overlay).borderRadius(CubeRadius.l)
+            .hitTestBehavior(HitTestMode.None).id('game-hint')
+            .transition(TransitionEffect.OPACITY.animation({ duration: 200 }))
+        }
+        Blank().layoutWeight(1).hitTestBehavior(HitTestMode.Transparent)
+        Row({ space: CubeSpace.xs }) {
+          Blank().hitTestBehavior(HitTestMode.Transparent)
+          Button({ type: ButtonType.Capsule }) {
+            Row({ space: CubeSpace.xxs }) {
+              SymbolGlyph($r('sys.symbol.hand_tap')).fontSize(16)
+                .fontColor([this.beginnerGuides ? CubeTheme.onAccent : CubeTheme.secondary])
+              Text(this.tr('guides_label')).fontSize(CubeFont.caption).maxLines(1)
+                .fontColor(this.beginnerGuides ? CubeTheme.onAccent : CubeTheme.secondary)
+            }
+          }.height(44).padding({ left: CubeSpace.s, right: CubeSpace.s })
+            .backgroundColor(this.beginnerGuides ? CubeTheme.accent : CubeTheme.surface)
+            .border({ width: 1, color: this.beginnerGuides ? CubeTheme.accent : CubeTheme.line, radius: 22 })
+            .animation({ duration: 160, curve: Curve.EaseOut })
+            .id('game-guides-toggle')
+            .accessibilityText(this.tr('guides_accessibility', this.beginnerGuides ? this.tr('on') : this.tr('off')))
+            .onClick(() => this.setBeginnerGuides(!this.beginnerGuides))
+          Button({ type: ButtonType.Capsule }) {
+            Row({ space: CubeSpace.xxs }) {
+              SymbolGlyph($r('sys.symbol.arrow_counterclockwise')).fontSize(16).fontColor([CubeTheme.green])
+              Text(this.tr('reset_view')).fontSize(CubeFont.caption).fontColor(CubeTheme.green).maxLines(1)
+            }
+          }.height(44).padding({ left: CubeSpace.s, right: CubeSpace.s }).backgroundColor(CubeTheme.surface)
+            .border({ width: 1, color: CubeTheme.line, radius: 22 })
+            .id('game-front-view').accessibilityText(this.tr('reset_view'))
+            .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
+        }.width('100%').hitTestBehavior(HitTestMode.Transparent).id('game-view-tools')
+      }.width('100%').height('100%').padding(CubeSpace.s).hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height('100%')
+  }
+
+  @Builder
+  private gameTools() {
+    Row({ space: CubeSpace.xs }) {
+      if (this.challengeIndex >= 0) {
+        if (this.phase === 'solved') {
+          Button(this.tr(this.challengeIndex === this.challenges.length - 1 ? 'result_levels' : 'teaching_next'),
+            { type: ButtonType.Normal }).layoutWeight(1).attributeModifier(CubeButtons.primary)
+            .enabled(!this.busy).onClick(() => this.nextChallenge())
+        } else {
+          Button(this.tr('teaching_retry'), { type: ButtonType.Normal }).layoutWeight(1)
+            .attributeModifier(CubeButtons.primary).enabled(!this.busy).onClick(() => this.retryChallenge())
+        }
+      } else {
+        Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1)
+          .attributeModifier(CubeButtons.primary).enabled(!this.busy).onClick(() => this.scramble())
+      }
+      Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).attributeModifier(CubeButtons.tonal)
+        .enabled(!this.busy && this.moves > 0 && this.phase !== 'tutorial' && this.phase !== 'solved')
+        .onClick(() => this.undo())
+      Button(this.tr('history_help'), { type: ButtonType.Normal }).layoutWeight(1).attributeModifier(CubeButtons.tonal)
+        .enabled(!this.busy && this.phase !== 'tutorial' && this.phase !== 'solved')
+        .onClick(() => this.showHint())
+      if (this.challengeIndex < 0) {
+        Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).attributeModifier(CubeButtons.quiet)
+          .enabled(!this.busy).onClick(() => this.confirmReset())
+      }
+    }.width('100%').id('game-tools')
   }
 
   @Builder
   private gamePage() {
-    Scroll(this.gameScroller) {
-      Column({ space: 12 }) {
-        Row({ space: 12 }) {
-          this.backButton()
-          Column({ space: 3 }) {
-            if (this.challengeIndex >= 0) {
-              Text(this.tr('teaching_level', this.challengeIndex + 1) + ' · ' +
-                this.tr(this.challenges[this.challengeIndex].titleKey))
-                .fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            } else {
-              Text(this.tr('cube_title', this.order)).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-            }
-            Row({ space: 5 }) {
-              Circle().width(5).height(5).fill(CubeTheme.green)
-              Text(this.phaseLabel()).fontSize(11).fontColor(CubeTheme.green)
-              if (this.challengeIndex >= 0) {
-                Text(this.tr('teaching_goal_summary')).fontSize(11).fontColor(CubeTheme.secondary)
-                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-              }
-            }.width('100%')
-          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          if (this.challengeIndex >= 0) {
-            this.teachingGoal()
-          }
-        }.width('100%').constraintSize({ minHeight: 48 }).id('game-header')
-        Row() {
-          Column({ space: 3 }) {
-            Text(this.tr('elapsed_time')).fontSize(11).fontColor('#C3D2CA')
-            Text(this.formatTime(this.elapsed)).fontFamily('monospace').fontSize(26)
-              .fontWeight(FontWeight.Medium).fontColor('#FFFFFF').maxLines(1)
-          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Column({ space: 3 }) {
-            Text(this.tr('move_count')).fontSize(11).fontColor('#C3D2CA')
-            Text(`${this.moves}`).fontSize(26).fontWeight(FontWeight.Medium).fontColor(CubeTheme.accent)
-          }.alignItems(HorizontalAlign.End).constraintSize({ minWidth: 48 })
-        }.width('100%').padding({ left: 18, right: 18, top: 10, bottom: 10 })
-          .backgroundColor(CubeTheme.ink).borderRadius(20)
-        Stack() {
-          this.cubeStage()
-        }.width('100%').height(Math.max(240, Math.min(480,
-          this.viewportHeight - 310)))
-        Row({ space: 8 }) {
-          if (this.challengeIndex >= 0) {
-            Button(this.tr('teaching_retry'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
-              .padding({ left: 4, right: 4 }).fontSize(14).labelStyle({ maxLines: 2 })
-              .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontWeight(FontWeight.Bold)
-              .enabled(!this.busy).onClick(() => this.retryChallenge())
-          } else {
-            Button(this.tr('scramble'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
-              .backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(14).fontWeight(FontWeight.Bold)
-              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
-              .enabled(!this.busy).onClick(() => this.scramble())
-          }
-          Button(this.tr('undo'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
-            .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(14).fontWeight(FontWeight.Bold)
-            .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
-            .enabled(!this.busy && this.moves > 0 && this.phase !== 'tutorial' && this.phase !== 'solved')
-            .onClick(() => this.undo())
-          Button(this.tr('history_help'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(14)
-            .backgroundColor(CubeTheme.mint).fontColor(CubeTheme.green).fontSize(14).fontWeight(FontWeight.Bold)
-            .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
-            .enabled(!this.busy && this.phase !== 'tutorial' && this.phase !== 'solved')
-            .onClick(() => this.showHint())
-        }.width('100%').id('game-primary-tools')
-        Row({ space: 6 }) {
-          if (this.challengeIndex >= 0) {
-            Button(this.tr('teaching_back'), { type: ButtonType.Normal }).layoutWeight(2).height(48).borderRadius(12)
-              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(13)
-              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
-              .onClick(() => this.goHome())
-          } else {
-            Button(this.tr('tutorial'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(12)
-              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(13).enabled(!this.busy)
-              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
-              .onClick(() => this.startLesson())
-            Button(this.tr('reset'), { type: ButtonType.Normal }).layoutWeight(1).height(48).borderRadius(12)
-              .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.secondary).fontSize(13)
-              .padding({ left: 4, right: 4 }).labelStyle({ maxLines: 2 })
-              .enabled(!this.busy).onClick(() => this.confirmReset())
-          }
-          Button(this.tr('reset_view'), { type: ButtonType.Normal }).layoutWeight(1).height(44)
-            .padding({ left: 4, right: 4 }).fontSize(12).labelStyle({ maxLines: 2 }).borderRadius(12)
-            .backgroundColor(CubeTheme.soft).fontColor(CubeTheme.green)
-            .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
-          Column({ space: 4 }) {
-            Text(this.tr('guides_label')).fontSize(11).fontColor(CubeTheme.secondary).maxLines(2)
-              .textAlign(TextAlign.Center)
-            Toggle({ type: ToggleType.Switch, isOn: this.beginnerGuides }).width(44).height(28)
-              .selectedColor(CubeTheme.green).switchStyle({ unselectedColor: CubeTheme.line })
-              .responseRegion({ x: -10, y: -8, width: 64, height: 44 })
-              .accessibilityText(this.tr('guides_accessibility', this.beginnerGuides ? this.tr('on') : this.tr('off')))
-              .onChange((value: boolean) => this.setBeginnerGuides(value))
-          }.width(74).constraintSize({ minHeight: 52 }).padding({ bottom: 8 })
-        }.width('100%').id('game-secondary-tools')
-        if (this.hint.length > 0 && this.hintKey !== 'teaching_start_hint') {
-          Text(this.hint).fontSize(12).lineHeight(19).fontColor(CubeTheme.green)
-            .width('100%').padding(12).backgroundColor(CubeTheme.mint).borderRadius(14)
-        }
-        if (this.challengeIndex >= 0 && this.phase === 'solved') {
+    Column() {
+      if (this.viewportWidth >= CubeLayout.wideBreakpoint) {
+        Row({ space: CubeSpace.m }) {
           Column() {
-            this.teachingControls()
-          }.width('100%').padding(14).backgroundColor(CubeTheme.surface).borderRadius(24)
-        }
-      }.width('100%').constraintSize({ maxWidth: 600 }).padding({ left: 18, right: 18, top: 10, bottom: 16 })
-    }.width('100%').height('100%').scrollBar(BarState.Off)
-      .onGestureRecognizerJudgeBegin((_event: BaseGestureEvent, current: GestureRecognizer) =>
-        this.judgeScrollGesture(current))
-      .onScrollFrameBegin((offset: number, state: ScrollState) => {
-        // Keep a cube gesture from also scrolling its surrounding page.
-        return { offsetRemain: this.touching ? 0 : offset };
+            this.gameStage('game-wide')
+          }.layoutWeight(1).height('100%')
+          Column({ space: CubeSpace.s }) {
+            this.gameHeader()
+            this.gameSummary()
+            Blank()
+            this.gameTools()
+          }.width(340).height('100%')
+        }.width('100%').height('100%')
+      } else {
+        Column({ space: CubeSpace.s }) {
+          this.gameHeader()
+          this.gameSummary()
+          Column() {
+            this.gameStage('game')
+          }.width('100%').layoutWeight(1)
+          this.gameTools()
+        }.width('100%').height('100%')
+      }
+    }.width('100%').height('100%').constraintSize({ maxWidth: CubeLayout.wideMaxWidth })
+      .padding({ left: 18, right: 18, top: 10, bottom: 16 })
+      .bindSheet($$this.goalVisible, this.goalSheet(), {
+        detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+        dragBar: true,
+        showClose: false,
+        backgroundColor: CubeTheme.surface,
+        onDisappear: () => { this.goalVisible = false; }
       })
-      .onAppear(() => this.gameScroller.scrollTo({ xOffset: 0, yOffset: 0 }))
   }
 
   @Builder
-  private statsPage() {
-    Column({ space: 22 }) {
-      this.header('statistics')
-      Scroll() {
-        Column({ space: 18 }) {
-          this.sectionTitle('personal_best', 'stats_tagline')
-          Row() {
-            Column({ space: 6 }) {
-              Text(this.tr('completed_challenges')).fontSize(12).fontColor('#C3D2CA')
-              Row({ space: 8 }) {
-                Text(`${this.records.length}`).fontSize(40).fontWeight(FontWeight.Bold).fontColor(CubeTheme.accent)
-                Text(this.tr('solve_unit')).fontSize(13).fontColor('#FFFFFF').margin({ top: 18 })
-              }
-            }.alignItems(HorizontalAlign.Start)
-            Blank()
-            this.chartMark(44, CubeTheme.accent)
-          }.width('100%').padding(22).backgroundColor(CubeTheme.ink).borderRadius(24)
-          Column({ space: 0 }) {
-            ForEach(this.orders, (value: number) => {
-              Row({ space: 12 }) {
-                Text(this.tr('order_label', value)).fontSize(12).fontWeight(FontWeight.Bold).fontColor(CubeTheme.green)
-                  .width(48).height(48).textAlign(TextAlign.Center).backgroundColor(CubeTheme.mint).borderRadius(15)
-                Column({ space: 5 }) {
-                  Text(this.orderDescription(value)).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                  Text(this.tr('completed_count', this.orderSolves(value))).fontSize(10).fontColor(CubeTheme.secondary)
-                }.alignItems(HorizontalAlign.Start)
-                Blank()
-                Text(this.bestTime(value)).fontSize(19).fontFamily('monospace').fontWeight(FontWeight.Medium)
-                  .fontColor(this.orderSolves(value) > 0 ? CubeTheme.green : CubeTheme.muted)
-              }.width('100%').padding({ top: 12, bottom: 12 })
-              if (value !== 5) {
-                Divider().color(CubeTheme.line)
-              }
-            })
-          }.width('100%').padding({ left: 16, right: 16 }).backgroundColor(CubeTheme.surface).borderRadius(24)
-          Row() {
-            Text(this.tr('recent_results')).fontSize(12).fontWeight(FontWeight.Medium).fontColor(CubeTheme.secondary).layoutWeight(1)
-            Blank()
-            Button(this.tr('clear'), { type: ButtonType.Normal }).height(44).fontSize(12).fontColor(CubeTheme.danger)
-              .backgroundColor(Color.Transparent).enabled(this.records.length > 0).onClick(() => this.clearRecords())
-          }.width('100%')
-          if (this.records.length === 0) {
-            Column({ space: 12 }) {
-              SymbolGlyph($r('sys.symbol.flag')).fontSize(28).fontColor([CubeTheme.green])
-              Text(this.tr('no_results')).fontSize(16).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-              Text(this.tr('no_results_help'))
-                .fontSize(12).fontColor(CubeTheme.secondary).lineHeight(21).textAlign(TextAlign.Center)
-              Button(this.tr('start_game'), { type: ButtonType.Normal }).height(46).padding({ left: 28, right: 28 })
-                .borderRadius(14).backgroundColor(CubeTheme.accent).fontColor(CubeTheme.ink).fontSize(13)
-                .onClick(() => this.startGame())
-            }.width('100%').padding(24).backgroundColor(CubeTheme.surface).borderRadius(24)
-          } else {
-            ForEach(this.records.slice(0, 20), (record: SolveRecord) => {
-              Row({ space: 14 }) {
-                Text(this.tr('order_label', record.order)).fontSize(12).fontWeight(FontWeight.Medium).fontColor(CubeTheme.green)
-                  .width(44).height(44).textAlign(TextAlign.Center).backgroundColor(CubeTheme.mint).borderRadius(12)
-                Column({ space: 5 }) {
-                  Text(this.formatTime(record.durationMs)).fontSize(20).fontColor(CubeTheme.ink).fontFamily('monospace')
-                  Text(this.tr('record_details', record.moves, this.dateLabel(record.date))).fontSize(11).fontColor(CubeTheme.secondary)
-                }.alignItems(HorizontalAlign.Start)
-                Blank()
-                if (this.formatTime(record.durationMs) === this.bestTime(record.order)) {
-                  Text(this.tr('best')).fontSize(10).fontColor(CubeTheme.green).padding(7)
-                    .backgroundColor(CubeTheme.mint).borderRadius(8)
-                }
-              }.width('100%').padding(16).backgroundColor(CubeTheme.surface).borderRadius(18)
-            })
-          }
-          Text(this.tr('results_retention'))
-            .fontSize(10).fontColor(CubeTheme.secondary).lineHeight(18).textAlign(TextAlign.Center)
-        }.width('100%').padding({ bottom: 24 })
-      }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
-    }.width('100%').height('100%').constraintSize({ maxWidth: 600 }).padding({ left: 22, right: 22, top: 10 })
-  }
-
-  @Builder
-  private settingsPage() {
-    Column({ space: 22 }) {
-      this.header('settings', true)
-      Scroll() {
-        Column({ space: 18 }) {
-          Column({ space: 16 }) {
-            Row() {
-              Text(this.tr('default_order')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-              Blank()
-              Text(this.tr('default_order_help')).fontSize(10).fontColor(CubeTheme.secondary).layoutWeight(1).textAlign(TextAlign.End)
-            }.width('100%')
-            Row({ space: 8 }) {
-              ForEach(this.orders, (value: number) => {
-                Button(this.tr('order_label', value), { type: ButtonType.Normal }).layoutWeight(1).height(46).borderRadius(13)
-                  .backgroundColor(this.defaultOrder === value ? CubeTheme.ink : CubeTheme.soft)
-                  .fontColor(this.defaultOrder === value ? CubeTheme.accent : CubeTheme.secondary)
-                  .accessibilityText(this.tr('order_accessibility', value, this.defaultOrder === value ? this.tr('selected_suffix') : ''))
-                  .onClick(() => { this.defaultOrder = value; this.order = value; this.saveSettings(); })
-              })
-            }.width('100%')
-          }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
-          Column({ space: 14 }) {
-            Row() {
-              Text(this.tr('turn_animation')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-              Blank()
-              Text(`${this.speed.toFixed(1)}×`).fontSize(13).fontWeight(FontWeight.Medium).fontColor(CubeTheme.green)
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 }).backgroundColor(CubeTheme.mint).borderRadius(10)
-            }.width('100%')
-            Slider({ value: this.speed, min: 0.5, max: 2, step: 0.1 })
-              .selectedColor(CubeTheme.green).trackColor(CubeTheme.line).blockColor(CubeTheme.green)
-              .accessibilityText(this.tr('speed_accessibility'))
-              .onChange((value: number, mode: SliderChangeMode) => {
-                this.speed = value;
-                if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) { this.saveSettings(); }
-              })
-            Row() {
-              Text(this.tr('speed_slow')).fontSize(11).fontColor(CubeTheme.secondary)
-              Blank()
-              Text(this.tr('speed_fast')).fontSize(11).fontColor(CubeTheme.secondary)
-            }.width('100%')
-          }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
-          Column({ space: 18 }) {
-            Row({ space: 12 }) {
-              Column({ space: 5 }) {
-                Text(this.tr('beginner_guides')).fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                Text(this.tr('beginner_guides_help'))
-                  .fontSize(11).lineHeight(17).fontColor(CubeTheme.secondary)
-              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.beginnerGuides }).selectedColor(CubeTheme.green)
-                .accessibilityText(this.tr('beginner_guides'))
-                .onChange((value: boolean) => this.setBeginnerGuides(value))
-            }.width('100%')
-            Divider().color(CubeTheme.line)
-            Row() {
-              Column({ space: 5 }) {
-                Text(this.tr('turn_sound')).fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                Text(this.tr('turn_sound_help')).fontSize(11).fontColor(CubeTheme.secondary)
-              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-              Blank().width(12)
-              Toggle({ type: ToggleType.Switch, isOn: this.sound }).selectedColor(CubeTheme.green)
-                .accessibilityText(this.tr('turn_sound'))
-                .onChange((value: boolean) => { this.sound = value; this.saveSettings(); })
-            }.width('100%')
-            Divider().color(CubeTheme.line)
-            Row() {
-              Column({ space: 5 }) {
-                Text(this.tr('haptic_feedback')).fontSize(15).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-                Text(this.tr('haptic_help')).fontSize(11).fontColor(CubeTheme.secondary)
-              }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-              Blank().width(12)
-              Toggle({ type: ToggleType.Switch, isOn: this.haptics }).selectedColor(CubeTheme.green)
-                .accessibilityText(this.tr('haptic_feedback'))
-                .onChange((value: boolean) => { this.haptics = value; this.saveSettings(); })
-            }.width('100%')
-          }.width('100%').padding(18).backgroundColor(CubeTheme.surface).borderRadius(24)
-          Column({ space: 12 }) {
-            Row({ space: 10 }) {
-              this.brandMark()
-              Column({ space: 3 }) {
-                Text(this.tr('about_name')).fontSize(15).fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-                Text(this.tr('about_tagline')).fontSize(11).fontColor(CubeTheme.secondary)
-              }.alignItems(HorizontalAlign.Start)
-            }.width('100%')
-            Text(this.tr('about_description'))
-              .fontSize(12).fontColor(CubeTheme.secondary).lineHeight(21).width('100%')
-          }.width('100%').padding(20).backgroundColor(CubeTheme.mint).borderRadius(24)
-        }.width('100%').padding({ bottom: 24 })
-      }.width('100%').layoutWeight(1).scrollBar(BarState.Off)
-    }.width('100%').height('100%').constraintSize({ maxWidth: 600 }).padding({ left: 22, right: 22, top: 10 })
+  private destination(name: string) {
+    NavDestination() {
+      Column() {
+        if (name === 'game') {
+          this.gamePage()
+        } else if (name === 'teaching') {
+          TeachingPage({
+            groups: this.teachingGroups(),
+            solved: this.teachingRecords.length,
+            total: this.challenges.length,
+            progress: this.tr('teaching_progress', this.teachingRecords.length, this.challenges.length),
+            loaded: this.loaded,
+            storageWarning: this.storageWarning,
+            onBack: () => this.goHome(),
+            onStart: (index: number) => this.startChallenge(index)
+          })
+        } else if (name === 'stats') {
+          StatsPage({
+            total: this.records.length,
+            rows: this.statsRows(),
+            recent: this.recentRows(),
+            trend: this.trendBars(),
+            trendOrder: this.order,
+            onBack: () => this.goHome(),
+            onStart: () => this.startGame(),
+            onClear: () => this.clearRecords()
+          })
+        } else {
+          SettingsPage({
+            defaultOrder: this.defaultOrder,
+            speed: this.speed,
+            sound: this.sound,
+            haptics: this.haptics,
+            beginnerGuides: this.beginnerGuides,
+            orders: this.orders,
+            onBack: () => this.goHome(),
+            onDefaultOrder: (value: number) => { this.defaultOrder = value; this.order = value; this.saveSettings(); },
+            onSpeed: (value: number, commit: boolean) => { this.speed = value; if (commit) { this.saveSettings(); } },
+            onSound: (value: boolean) => { this.sound = value; this.saveSettings(); },
+            onHaptics: (value: boolean) => { this.haptics = value; this.saveSettings(); },
+            onGuides: (value: boolean) => this.setBeginnerGuides(value)
+          })
+        }
+      }.width('100%').height('100%')
+    }.hideTitleBar(true).backgroundColor(CubeTheme.background)
+      .onBackPressed(() => this.onBackPress())
   }
 
   build() {
-    Stack() {
-      if (this.page === 'home') {
+    Navigation(this.navStack) {
+      Column() {
         this.homePage()
-      } else if (this.page === 'game') {
-        this.gamePage()
-      } else if (this.page === 'teaching') {
-        this.teachingPage()
-      } else if (this.page === 'stats') {
-        this.statsPage()
-      } else {
-        this.settingsPage()
-      }
-    }.width('100%').height('100%').backgroundColor(CubeTheme.background)
-      .onAreaChange((_old: Area, area: Area) => { this.viewportHeight = Number(area.height); })
+      }.width('100%').height('100%')
+    }
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
+    .hideToolBar(true)
+    .navDestination(this.destination)
+    .width('100%').height('100%').backgroundColor(CubeTheme.background)
+    .onAreaChange((_old: Area, area: Area) => {
+      this.viewportHeight = Number(area.height);
+      this.viewportWidth = Number(area.width);
+    })
   }
 }
