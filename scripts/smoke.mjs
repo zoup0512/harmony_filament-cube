@@ -40,6 +40,8 @@ const REMOTE_JSON = '/data/local/tmp/razor-smoke.json';
 const RUN_ID = `${Date.now()}-${process.pid}`;
 const WAIT_MS = 15000;
 const COMMAND_MS = 10000;
+// dumpLayout occasionally takes >10s over wireless hdc; a short timeout fails a whole case.
+const DUMP_MS = 15000;
 const MIN_COMMAND_MS = 2000;
 const summary = {
   startedAt: new Date().toISOString(), target: TARGET, bundle: BUNDLE, locale: SMOKE_LOCALE,
@@ -154,11 +156,21 @@ function usable(node, state = latest) {
   }
   return true;
 }
-function dump(timeout = COMMAND_MS) {
+function dump(timeout = DUMP_MS) {
   const local = join(OUT, 'latest.json');
   rmSync(local, { force: true }); // Never accept a stale received layout.
-  const deadline = Date.now() + timeout;
-  hdc(['shell', 'uitest', 'dumpLayout', '-p', REMOTE_JSON], timeout);
+  let deadline = Date.now() + timeout;
+  try {
+    hdc(['shell', 'uitest', 'dumpLayout', '-p', REMOTE_JSON], timeout);
+  } catch (error) {
+    // Wireless hdc occasionally stalls a dump; retry once so transport jitter
+    // does not turn into a case failure.
+    if (!/ETIMEDOUT/.test(error.message)) throw error;
+    summary.diagnostics.push({ case: currentCase, operation: 'dumpLayout retry', at: new Date().toISOString(), error: error.message });
+    console.warn('[RETRY] dumpLayout timed out; retrying once');
+    deadline = Date.now() + DUMP_MS;
+    hdc(['shell', 'uitest', 'dumpLayout', '-p', REMOTE_JSON], DUMP_MS);
+  }
   const receiveBudget = deadline - Date.now();
   if (receiveBudget < MIN_COMMAND_MS) {
     const error = new Error('Polling budget exhausted before file recv; keeping last complete layout');
@@ -224,7 +236,7 @@ async function waitFor(description, predicate, timeout = WAIT_MS, stableSamples 
     if (remaining < MIN_COMMAND_MS) break;
     let state;
     try {
-      state = dump(Math.min(COMMAND_MS, remaining));
+      state = dump(Math.min(DUMP_MS, remaining));
     } catch (error) {
       if (error.code === 'SMOKE_POLL_BUDGET') break;
       lastError = error.message;
@@ -693,7 +705,7 @@ async function main() {
     check(timer(state) === '00:00.00' && moves(state) === 0, 'ready has zero timer and zero moves');
     await capture('scrambled-ready');
     state = await waitFor('ready stays zero until first turn', s =>
-      has(s, '准备开始') && timer(s) === '00:00.00' && moves(s) === 0, 6000, 2);
+      has(s, '准备开始') && timer(s) === '00:00.00' && moves(s) === 0, 15000, 2);
     check(timer(state) === '00:00.00', 'ready timer remains stopped across dumps');
     await swipeFace('R', 3, 'first surface R after scramble');
     state = await waitFor('first R starts timer and counts exactly 1', s =>
@@ -746,10 +758,23 @@ async function main() {
   });
 
   await runCase('gesture-guides-switch', async () => {
-    // The game control is a toggle button over the cube; its accessibility text carries on/off.
+    // The game control is a toggle button over the cube. UI Test on API 26 does not expose
+    // accessibilityText (that binding is source-tested), but the capsule's accent background is
+    // the visible on/off state, so observe that in the dump instead.
     const gameToggle = state => state.nodes.find(n => n.a.id === 'game-guides-toggle' && usable(n, state) && n.enabled);
-    const guideLabel = value => normalize(BASE_STRINGS.guides_accessibility.replace('%1$s', BASE_STRINGS[value ? 'on' : 'off']));
-    const gameState = (toggle, value) => Boolean(toggle) && observedText(toggle.a.description) === guideLabel(value);
+    const colorKey = value => String(value ?? '').replace('#', '').slice(-6).toUpperCase();
+    const resourceColors = name => ['base', 'dark'].flatMap(directory => {
+      try {
+        return JSON.parse(readFileSync(join(ROOT, `entry/src/main/resources/${directory}/element/color.json`), 'utf8'))
+          .color.filter(color => color.name === name).map(color => colorKey(color.value));
+      } catch { return []; }
+    });
+    const accentColors = new Set(resourceColors('cube_accent'));
+    const surfaceColors = new Set(resourceColors('cube_surface'));
+    const guideOn = toggle => Boolean(toggle) && accentColors.has(colorKey(toggle.a.backgroundColor));
+    const knownColor = toggle => Boolean(toggle) && (accentColors.has(colorKey(toggle.a.backgroundColor)) ||
+      surfaceColors.has(colorKey(toggle.a.backgroundColor)));
+    const gameState = (toggle, value) => Boolean(toggle) && guideOn(toggle) === value;
     const settingsToggle = state => {
       const label = find(state, BASE_STRINGS.beginner_guides, 'Text');
       return descendants(label?.parent?.parent).find(n => /Toggle|Switch/.test(n.type) && usable(n, state) && n.enabled);
@@ -761,8 +786,10 @@ async function main() {
     };
     const hasState = (toggle, value) => Boolean(toggle) && String(toggle.a.checked) === String(value);
     const initial = await game(3);
-    const original = gameState(gameToggle(initial), true);
-    check(original || gameState(gameToggle(initial), false), 'game guide toggle announces its on/off state');
+    const initialToggle = gameToggle(initial);
+    check(knownColor(initialToggle), 'game guide toggle exposes its on/off state',
+      { backgroundColor: initialToggle?.a.backgroundColor });
+    const original = guideOn(initialToggle);
     try {
       check(has(initial, BASE_STRINGS.guides_label), 'game labels the toggle as gesture guides');
       await capture('guides-game-initial');
