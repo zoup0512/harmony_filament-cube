@@ -1,8 +1,7 @@
 import { CubeModel, CubeMove } from '../model/CubeModel';
 import { CubeRenderer, CubeSwipeGuide } from '../render/CubeRenderer';
-import { CubeFont, CubeLayout, CubeRadius, CubeSpace, CubeTheme } from '../pages/CubeTheme';
+import { CubeFont, CubeRadius, CubeSpace, CubeTheme } from '../pages/CubeTheme';
 import { CubeButtons } from '../pages/CubeStyles';
-import { BrandMark } from './CubeWidgets';
 
 // Demo-only camera, closer to front-on so the swiped layer reads clearly.
 // The game camera in Index.ets (0.62 / -0.42) is intentionally unchanged.
@@ -131,32 +130,10 @@ export struct IntroPage {
     ctx.restore();
   }
 
-  @Builder
-  private gestureCard(icon: Resource, title: ResourceStr, description: ResourceStr) {
-    Row({ space: CubeSpace.s }) {
-      Stack({ alignContent: Alignment.Center }) {
-        SymbolGlyph(icon).fontSize(CubeFont.headline).fontColor([CubeTheme.green])
-      }.width(CubeLayout.touchTarget).height(CubeLayout.touchTarget)
-        .backgroundColor(CubeTheme.mint).borderRadius(CubeRadius.m)
-      Column({ space: CubeSpace.xxs }) {
-        Text(title).fontSize(CubeFont.subhead).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-        Text(description).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
-      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-    }.width('100%').padding(CubeSpace.m).backgroundColor(CubeTheme.surface).borderRadius(CubeRadius.l)
-  }
-
   build() {
     Column() {
       Scroll() {
         Column({ space: CubeSpace.m }) {
-          Row({ space: CubeSpace.s }) {
-            BrandMark()
-            Column({ space: CubeSpace.xxs }) {
-              Text($r('app.string.brand_name')).fontSize(CubeFont.label).letterSpacing(1.5)
-                .fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-              Text($r('app.string.brand_tagline')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          }.width('100%').constraintSize({ minHeight: CubeLayout.touchTarget })
           Column({ space: CubeSpace.xs }) {
             Text($r('app.string.intro_title')).fontSize(CubeFont.title).fontWeight(FontWeight.Bold)
               .fontColor(CubeTheme.ink).textAlign(TextAlign.Center)
@@ -187,13 +164,8 @@ export struct IntroPage {
             .linearGradient({ angle: 135, colors: [[CubeTheme.stageStart, 0], [CubeTheme.stageEnd, 1]] })
             .borderRadius(CubeRadius.xl).clip(true)
             .accessibilityText($r('app.string.intro_stage_accessibility'))
-          Column({ space: CubeSpace.s }) {
-            this.gestureCard($r('sys.symbol.hand_tap'), $r('app.string.intro_swipe_title'),
-              $r('app.string.intro_swipe_desc'))
-            this.gestureCard($r('sys.symbol.arrow_counterclockwise'), $r('app.string.intro_orbit_title'),
-              $r('app.string.intro_orbit_desc'))
-          }.width('100%')
-        }.width('100%').constraintSize({ maxWidth: CONTENT_MAX_WIDTH })
+        }.width('100%').constraintSize({ minHeight: '100%', maxWidth: CONTENT_MAX_WIDTH })
+          .justifyContent(FlexAlign.Center)
           .padding({ left: CubeSpace.l, right: CubeSpace.l, top: CubeSpace.s, bottom: CubeSpace.m })
       }.width('100%').layoutWeight(1).scrollBar(BarState.Off).align(Alignment.Top)
       // Bottom_Bar: outside the Scroll, so the start button never scrolls away or gets covered.

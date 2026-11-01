@@ -249,7 +249,6 @@ test('Property 3: demoStageHeight is an integer in [220, 360] and never shrinks 
 // ---------- Source-shape checks ----------
 
 const buildBlock = blockFrom(introSource, '  build() {', 'build');
-const cardBlock = blockFrom(introSource, 'private gestureCard(', 'gestureCard');
 const frameBlock = blockFrom(introSource, 'private demoFrame(): void {', 'demoFrame');
 
 test('IntroPage camera is front-facing and separate from the game camera', () => {
@@ -274,7 +273,9 @@ test('IntroPage pins the start button in a bottom bar outside the scroll', () =>
   const start = buildBlock.indexOf(".id('intro-start')");
   assert.ok(scroll >= 0 && scrollEnd > scroll && start > scrollEnd, 'intro-start follows the Scroll');
   assert.match(introSource, /const CONTENT_MAX_WIDTH: number = 520;/);
-  assert.equal(buildBlock.split('constraintSize({ maxWidth: CONTENT_MAX_WIDTH })').length - 1, 2);
+  assert.equal(buildBlock.split('maxWidth: CONTENT_MAX_WIDTH').length - 1, 2, 'content and bottom bar share the width cap');
+  assert.match(buildBlock, /constraintSize\(\{ minHeight: '100%', maxWidth: CONTENT_MAX_WIDTH \}\)/);
+  assert.match(buildBlock, /\.justifyContent\(FlexAlign\.Center\)/);
   assert.match(buildBlock, /\.attributeModifier\(CubeButtons\.hero\)\.id\('intro-start'\)/);
   assert.match(buildBlock, /\.accessibilityText\(\$r\('app\.string\.intro_start'\)\)/);
   assert.match(buildBlock, /sys\.symbol\.arrow_right/);
@@ -294,25 +295,19 @@ test('IntroPage stage adapts its height and keeps the badge in the bottom-right 
   assert.match(buildBlock, /\.id\('intro-demo-canvas'\)[\s\S]*?HitTestMode\.None[\s\S]*?accessibilityLevel\('no'\)/);
 });
 
-test('IntroPage layout keeps its order, uses cards and theme tokens only', () => {
-  const order = ['brand_name', 'intro_title', 'intro-demo-canvas', 'intro_swipe_title', 'intro-start']
-    .map(marker => buildBlock.indexOf(marker));
+test('IntroPage layout is title, stage and pinned start button, with theme tokens only', () => {
+  const order = ['intro_title', 'intro-demo-canvas', 'intro-start'].map(marker => buildBlock.indexOf(marker));
   assert.ok(order.every(i => i >= 0), 'all layout markers present');
-  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'brand, title, stage, cards, button');
-  assert.match(cardBlock, /\.backgroundColor\(CubeTheme\.surface\)/);
-  assert.match(cardBlock, /\.borderRadius\(CubeRadius\.\w+\)/);
-  assert.match(cardBlock, /\.padding\(CubeSpace\.\w+\)/);
-  assert.doesNotMatch(introSource, /gestureRow/);
-  for (const block of [buildBlock, cardBlock]) {
-    assert.doesNotMatch(block, /(fontSize|padding|margin|borderRadius|width|height)\(\s*\d/);
-    assert.doesNotMatch(block, /(space|left|right|top|bottom): \d/);
-    assert.doesNotMatch(block, /#[0-9A-Fa-f]{3,8}\b/);
-    for (const [, argument] of block.matchAll(/fontSize\(([^)]*)\)/g)) assert.match(argument, /^CubeFont\.\w+$/);
-  }
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'title, stage, button');
+  assert.doesNotMatch(introSource, /gestureCard|gestureRow|BrandMark|brand_name|brand_tagline/);
+  assert.doesNotMatch(introSource, /intro_swipe_|intro_orbit_/);
+  assert.doesNotMatch(buildBlock, /(fontSize|padding|margin|borderRadius|width|height)\(\s*\d/);
+  assert.doesNotMatch(buildBlock, /(space|left|right|top|bottom): \d/);
+  assert.doesNotMatch(buildBlock, /#[0-9A-Fa-f]{3,8}\b/);
+  for (const [, argument] of buildBlock.matchAll(/fontSize\(([^)]*)\)/g)) assert.match(argument, /^CubeFont\.\w+$/);
   const keys = new Set([...introSource.matchAll(/\$r\('app\.string\.(\w+)'\)/g)].map(m => m[1]));
-  assert.deepEqual([...keys].sort(), ['brand_name', 'brand_tagline', 'intro_demo_badge', 'intro_orbit_desc',
-    'intro_orbit_title', 'intro_stage_accessibility', 'intro_start', 'intro_subtitle', 'intro_swipe_desc',
-    'intro_swipe_title', 'intro_title']);
+  assert.deepEqual([...keys].sort(), ['intro_demo_badge', 'intro_stage_accessibility', 'intro_start',
+    'intro_subtitle', 'intro_title']);
 });
 
 test('IntroPage keeps its own demo model, onDone-only completion and timer lifecycle', () => {
