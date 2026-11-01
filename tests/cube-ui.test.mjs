@@ -223,6 +223,7 @@ test('pages run on Navigation: home is the root, others are NavDestinations that
   assert.match(destination, /NavDestination\(\) \{/);
   assert.match(destination, /\.hideTitleBar\(true\)/);
   assert.match(destination, /\.onBackPressed\(\(\) => this\.onBackPress\(\)\)/);
+  assert.match(destination, /if \(name === 'intro'\) \{\s*IntroPage\(\{ onDone: \(\) => this\.finishIntro\(\) \}\)/);
   assert.match(destination, /if \(name === 'game'\) \{\s*this\.gamePage\(\)/);
   for (const page of ['TeachingPage', 'StatsPage', 'SettingsPage']) {
     assert.match(destination, new RegExp(`${page}\\(\\{[\\s\\S]*?onBack: \\(\\) => this\\.goHome\\(\\)`));
@@ -230,6 +231,17 @@ test('pages run on Navigation: home is the root, others are NavDestinations that
   assert.match(source, /@State @Watch\('syncNav'\) private page: string = 'home';/);
   assert.match(source, /private navStack: NavPathStack = new NavPathStack\(\);/);
   assert.doesNotMatch(source, /Scroller|gameScroller/);
+});
+
+test('first-run gesture intro loads once, completes via button or system back, then persists', () => {
+  const loading = member('loadData');
+  assert.match(loading, /this\.onboarded = this\.store\.settings\.onboarded === true;/);
+  assert.match(loading, /if \(!this\.onboarded && this\.page === 'home'\) \{ this\.page = 'intro'; \}/);
+  const finish = member('finishIntro');
+  assert.match(finish, /if \(this\.page !== 'intro'\) \{ return; \}/);
+  assert.match(finish, /this\.onboarded = true;\s*this\.page = 'home';\s*this\.saveSettings\(\);/);
+  assert.match(member('onBackPress'), /if \(this\.page === 'intro'\) \{\s*this\.finishIntro\(\);\s*return true;\s*\}/);
+  assert.match(member('saveSettings'), /settings\.onboarded = this\.onboarded;/);
 });
 
 test('extracted pages receive data and callbacks, not the game model', () => {

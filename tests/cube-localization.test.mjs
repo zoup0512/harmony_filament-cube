@@ -129,7 +129,7 @@ test('page and ability labels are fully resource-backed without hardcoded Chines
   for (const [call, , args] of builderCalls) assert.doesNotMatch(args, /this\.tr\(/, `${call} passes a key, not a translation`);
 });
 
-const components = Object.fromEntries(['CubeWidgets', 'StatsPage', 'TeachingPage', 'SettingsPage']
+const components = Object.fromEntries(['CubeWidgets', 'StatsPage', 'TeachingPage', 'SettingsPage', 'IntroPage']
   .map(name => [name, read(`entry/src/main/ets/components/${name}.ets`)]));
 
 test('extracted page components resolve every visible label from resources in all locales', () => {

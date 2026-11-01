@@ -543,14 +543,27 @@ function orderSelected(state, order) {
   return Boolean(color) && peers.every(n => n && (n === selected || n.a.backgroundColor !== color)) &&
     new Set(peers.filter(n => n !== selected).map(n => n.a.backgroundColor)).size === 1;
 }
+const introButton = state => button(state, BASE_STRINGS.intro_start);
+async function dismissIntro(state) {
+  // The first launch after install opens the gesture intro once; finishing persists.
+  if (!introButton(state)) return false;
+  await tap(BASE_STRINGS.intro_start);
+  await waitFor('home after the first-run gesture intro', s => isHome(s) && enabledButton(s, /开始挑战/),
+    WAIT_MS, 2);
+  return true;
+}
 async function restart() {
   shell('aa', 'force-stop', BUNDLE);
   shell('aa', 'start', '-b', BUNDLE, '-a', 'EntryAbility');
   appStarted = true;
-  return waitFor('EntryAbility home loaded', s => isHome(s) && enabledButton(s, /开始挑战/), 25000, 2);
+  const state = await waitFor('EntryAbility home or intro loaded', s =>
+    (isHome(s) && enabledButton(s, /开始挑战/)) || Boolean(introButton(s)), 25000, 2);
+  if (await dismissIntro(state)) return latest;
+  return state;
 }
 async function home() {
   const state = dump();
+  if (await dismissIntro(state)) return;
   if (isHome(state)) return;
   await tapBack();
   const next = await waitFor('home or leave confirmation', s => isHome(s) || leaveDialogReady(s));

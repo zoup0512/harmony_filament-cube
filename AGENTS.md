@@ -17,6 +17,10 @@
 - Game logic stays in `pages/Index.ets`; tests extract its methods and field initializers verbatim
   (`tests/cube-game.test.mjs`, `tests/cube-touch.test.mjs`). New VM globals used by Index fields need mocks there.
 - `components/*` are presentational: data via `@Prop` view models, actions via callbacks, labels via `$r`.
+  `IntroPage` is the exception: it owns a throwaway `CubeModel`/`CubeRenderer` for the first-run
+  gesture demo (never touches the game cube) and reports back only via `onDone`.
 - Colors only through `CubeTheme` (resources in `base/` and `dark/` color.json must share keys); fonts >= 12fp.
 - Do not use `Circle/Rect` shapes with resource colors (API 26 only; app is compatible with API 24).
 - en and en_US string tables must stay identical; visible copy must avoid "game/play" wording (localization test).
+- The first-run gesture intro is gated by `CubeSettings.onboarded` (missing = not seen); both the
+  start button and system back call `finishIntro()`, which persists before going home.

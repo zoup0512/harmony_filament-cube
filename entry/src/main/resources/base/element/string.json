@@ -727,6 +727,42 @@
     {
       "name": "teaching_goal_rules",
       "value": "关于提示"
+    },
+    {
+      "name": "intro_title",
+      "value": "滑动，就能转动"
+    },
+    {
+      "name": "intro_subtitle",
+      "value": "转层和视角，都在指尖完成"
+    },
+    {
+      "name": "intro_demo_badge",
+      "value": "实时演示"
+    },
+    {
+      "name": "intro_swipe_title",
+      "value": "在魔方上滑动"
+    },
+    {
+      "name": "intro_swipe_desc",
+      "value": "指尖划过色块，整层随手势转动"
+    },
+    {
+      "name": "intro_orbit_title",
+      "value": "空白处或双指拖动"
+    },
+    {
+      "name": "intro_orbit_desc",
+      "value": "转动视角，看清每一个角度"
+    },
+    {
+      "name": "intro_start",
+      "value": "开始体验"
+    },
+    {
+      "name": "intro_stage_accessibility",
+      "value": "手势演示动画：手指划过魔方，一层随手势转动"
     }
   ]
 }

@@ -15,6 +15,7 @@ export class CubeSettings {
   sound: boolean = true;
   haptics: boolean = true;
   beginnerGuides: boolean = true;
+  onboarded: boolean = false;
 }
 
 export class SolveRecord {
@@ -60,7 +61,8 @@ function isValidSettings(settings: CubeSettings): boolean {
     typeof settings.speed === 'number' && Number.isFinite(settings.speed) &&
     settings.speed >= 0.5 && settings.speed <= 2 &&
     typeof settings.sound === 'boolean' && typeof settings.haptics === 'boolean' &&
-    (settings.beginnerGuides === undefined || typeof settings.beginnerGuides === 'boolean');
+    (settings.beginnerGuides === undefined || typeof settings.beginnerGuides === 'boolean') &&
+    (settings.onboarded === undefined || typeof settings.onboarded === 'boolean');
 }
 
 function isValidRecord(record: SolveRecord): boolean {
@@ -138,6 +140,8 @@ function copySettings(settings: CubeSettings): CubeSettings {
   copy.haptics = settings.haptics;
   // Older preferences predate beginner guides; keep their other choices intact.
   copy.beginnerGuides = settings.beginnerGuides === undefined ? true : settings.beginnerGuides;
+  // Missing onboarded means the gesture intro has not been shown yet.
+  copy.onboarded = settings.onboarded === undefined ? false : settings.onboarded;
   return copy;
 }
 

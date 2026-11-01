@@ -31,7 +31,8 @@ const names = [
   'openTeaching', 'startChallenge', 'retryChallenge', 'leaveChallenge', 'nextChallenge',
   'teachingStatus', 'teachingBest', 'teachingKind', 'teachingGroups', 'statsRows', 'recentRows', 'trendBars',
   'finishTeaching', 'goHome', 'onBackPress', 'scramble', 'startTutorial', 'showTeachingGoal',
-  'showSolveResult', 'isNewBest', 'resultPrimary', 'closeSolveResult', 'aboutToDisappear', 'syncNav'
+  'showSolveResult', 'isNewBest', 'resultPrimary', 'closeSolveResult', 'aboutToDisappear', 'syncNav',
+  'finishIntro'
 ];
 const members = names.map(name => {
   const matches = [...source.matchAll(new RegExp(
@@ -1107,7 +1108,8 @@ for (const enabled of [false, true]) {
   test(`loadData restores beginnerGuides=${enabled} and saving other preferences retains it`, async t => {
     const h = harness(t, { canvasReady: true });
     const { state: s, calls } = h;
-    s.store.settings = { defaultOrder: 4, speed: 1.5, sound: true, haptics: false, beginnerGuides: enabled };
+    s.store.settings = { defaultOrder: 4, speed: 1.5, sound: true, haptics: false,
+      beginnerGuides: enabled, onboarded: true };
     await s.loadData();
     assert.equal(s.loaded, true);
     assert.equal(s.storageWarning, '');
@@ -1116,7 +1118,7 @@ for (const enabled of [false, true]) {
     s.speed = 2;
     s.saveSettings();
     assert.deepEqual({ ...calls.settings.at(-1) }, {
-      defaultOrder: 4, speed: 2, sound: true, haptics: false, beginnerGuides: enabled
+      defaultOrder: 4, speed: 2, sound: true, haptics: false, beginnerGuides: enabled, onboarded: true
     });
   });
 }
@@ -2490,7 +2492,8 @@ test('loadData restores teaching progress separately from normal results and doe
   const record = s.teachingRecords[0];
   s.leavePage();
   s.teachingRecords = [];
-  s.store.settings = { defaultOrder: 5, speed: 1, sound: true, haptics: true, beginnerGuides: true };
+  s.store.settings = { defaultOrder: 5, speed: 1, sound: true, haptics: true, beginnerGuides: true,
+    onboarded: true };
   await s.loadData();
   assert.equal(s.loaded, true);
   assert.equal(s.storageWarning, '');
@@ -2815,4 +2818,49 @@ test('teaching catalogue view models group levels by size with real status kinds
   assert.equal(items[1].best, s.teachingBest(second));
   assert.equal(items[2].best, '');
   assert.equal(items[7].details, s.tr('teaching_level_details', s.challenges[7].order, s.challenges[7].referenceMoves));
+});
+
+test('first launch routes to the gesture intro above home and finishing it returns home and persists', async t => {
+  const { state: s, calls } = harness(t);
+  s.page = 'home';
+  s.store.settings = { defaultOrder: 3, speed: 1, sound: true, haptics: true, beginnerGuides: true,
+    onboarded: false };
+  await s.loadData();
+  assert.equal(s.loaded, true);
+  assert.equal(s.page, 'intro');
+  assert.deepEqual(s.navStack.getAllPathName(), ['intro'], 'the intro opens above the home root');
+  s.finishIntro();
+  assert.equal(s.page, 'home');
+  assert.deepEqual(s.navStack.getAllPathName(), []);
+  assert.equal(s.onboarded, true);
+  assert.equal(calls.settings.at(-1).onboarded, true, 'completion persists before other changes');
+});
+
+test('a returning user skips the gesture intro after data loads', async t => {
+  const { state: s } = harness(t);
+  s.page = 'home';
+  s.store.settings = { defaultOrder: 3, speed: 1, sound: true, haptics: true, beginnerGuides: true,
+    onboarded: true };
+  await s.loadData();
+  assert.equal(s.page, 'home');
+  assert.deepEqual(s.navStack.getAllPathName(), []);
+});
+
+test('system back on the gesture intro completes onboarding instead of exiting', t => {
+  const { state: s, calls } = harness(t);
+  s.page = 'home';
+  s.page = 'intro';
+  assert.equal(s.onBackPress(), true);
+  assert.equal(s.page, 'home');
+  assert.equal(s.onboarded, true);
+  assert.equal(calls.settings.at(-1).onboarded, true);
+});
+
+test('finishIntro ignores pages other than the gesture intro', t => {
+  const { state: s, calls } = harness(t);
+  const before = calls.settings.length;
+  s.finishIntro();
+  assert.equal(s.page, 'game');
+  assert.equal(s.onboarded, false);
+  assert.equal(calls.settings.length, before, 'no settings write outside the intro');
 });

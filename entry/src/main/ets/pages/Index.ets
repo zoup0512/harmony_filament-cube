@@ -13,6 +13,7 @@ import { BackButton, BrandMark, ChartMark, OrderSelector } from '../components/C
 import { StatsOrderRow, StatsPage, StatsRecentRow } from '../components/StatsPage';
 import { TeachingGroup, TeachingItem, TeachingPage } from '../components/TeachingPage';
 import { SettingsPage } from '../components/SettingsPage';
+import { IntroPage } from '../components/IntroPage';
 
 @Entry
 @Component
@@ -52,6 +53,7 @@ struct Index {
   private hintKey: string = '';
   private hintArgs: Array<string | number> = [];
   private gestureHelpSeen: boolean = false;
+  private onboarded: boolean = false;
 
   private model: CubeModel = new CubeModel(3);
   private renderer: CubeRenderer = new CubeRenderer();
@@ -126,6 +128,10 @@ struct Index {
       this.closeSolveResult();
       return true;
     }
+    if (this.page === 'intro') {
+      this.finishIntro();
+      return true;
+    }
     if (this.page !== 'home') {
       this.goHome();
       return true;
@@ -194,6 +200,7 @@ struct Index {
       this.sound = this.store.settings.sound;
       this.haptics = this.store.settings.haptics;
       this.beginnerGuides = this.store.settings.beginnerGuides;
+      this.onboarded = this.store.settings.onboarded === true;
       this.records = this.store.records.slice();
       this.teachingRecords = this.store.teachingRecords.slice();
       this.invalidateGesture(true);
@@ -203,7 +210,16 @@ struct Index {
       this.storageWarning = this.tr('storage_unavailable');
     }
     this.loaded = true;
+    // First launch (or an install that predates the flag) opens the gesture intro once.
+    if (!this.onboarded && this.page === 'home') { this.page = 'intro'; }
     await this.feedback.prepare(context);
+  }
+
+  private finishIntro(): void {
+    if (this.page !== 'intro') { return; }
+    this.onboarded = true;
+    this.page = 'home';
+    this.saveSettings();
   }
 
   private startTimers(): void {
@@ -936,6 +952,7 @@ struct Index {
     settings.sound = this.sound;
     settings.haptics = this.haptics;
     settings.beginnerGuides = this.beginnerGuides;
+    settings.onboarded = this.onboarded;
     this.store.saveSettings(settings).catch(() => this.toast(this.tr('settings_save_failed')));
   }
 
@@ -1431,7 +1448,9 @@ struct Index {
   private destination(name: string) {
     NavDestination() {
       Column() {
-        if (name === 'game') {
+        if (name === 'intro') {
+          IntroPage({ onDone: () => this.finishIntro() })
+        } else if (name === 'game') {
           this.gamePage()
         } else if (name === 'teaching') {
           TeachingPage({

@@ -727,6 +727,42 @@
     {
       "name": "teaching_goal_rules",
       "value": "About hints"
+    },
+    {
+      "name": "intro_title",
+      "value": "Swipe to turn"
+    },
+    {
+      "name": "intro_subtitle",
+      "value": "Layer turns and view orbits, all done by touch"
+    },
+    {
+      "name": "intro_demo_badge",
+      "value": "Live demo"
+    },
+    {
+      "name": "intro_swipe_title",
+      "value": "Swipe the cube"
+    },
+    {
+      "name": "intro_swipe_desc",
+      "value": "Glide across a sticker and the whole layer turns with your finger"
+    },
+    {
+      "name": "intro_orbit_title",
+      "value": "Drag the background or use two fingers"
+    },
+    {
+      "name": "intro_orbit_desc",
+      "value": "Orbit the view to check every angle"
+    },
+    {
+      "name": "intro_start",
+      "value": "Get started"
+    },
+    {
+      "name": "intro_stage_accessibility",
+      "value": "Gesture demo: a swipe across the cube turns a layer"
     }
   ]
 }

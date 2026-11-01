@@ -26,7 +26,8 @@ const { CubeStore, CubeSettings, SolveRecord, TeachingRecord, default: DefaultSt
   dataURL(stripTypeScriptTypes(rewritten, { mode: 'strip' }))
 );
 
-const defaults = { defaultOrder: 3, speed: 1, sound: true, haptics: true, beginnerGuides: true };
+const defaults = { defaultOrder: 3, speed: 1, sound: true, haptics: true, beginnerGuides: true,
+  onboarded: false };
 const settings = overrides => ({ ...defaults, ...overrides });
 const record = overrides => ({ order: 3, durationMs: 1234.5, moves: 20, date: 100, ...overrides });
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -104,6 +105,10 @@ const invalidSettings = invalidObjects(settings(), {
 for (const value of [0, 1, 'false', 'true', null, [], {}]) {
   invalidSettings.push([`beginnerGuides=${String(value)}`, settings({ beginnerGuides: value })]);
 }
+// Missing onboarded is a supported legacy setting, not a validation error.
+for (const value of [0, 1, 'false', 'true', null, [], {}]) {
+  invalidSettings.push([`onboarded=${String(value)}`, settings({ onboarded: value })]);
+}
 const invalidRecords = invalidObjects(record(), {
   order: invalidOrders,
   durationMs: [-1, NaN, Infinity, -Infinity, '123', null, true],
@@ -149,12 +154,27 @@ test('legacy settings enable beginner arrows without resetting existing preferen
   const legacy = { defaultOrder: 5, speed: 1.7, sound: true, haptics: false };
   const json = JSON.stringify(legacy);
   const { store, calls, durable } = await loaded({ settings: json });
-  assert.deepEqual(plain(store.settings), { ...legacy, beginnerGuides: true });
+  assert.deepEqual(plain(store.settings), { ...legacy, beginnerGuides: true, onboarded: false });
   assert.deepEqual(calls, []);
   assert.equal(durable.get('settings'), json);
   await store.saveSettings(legacy);
-  assert.deepEqual(JSON.parse(durable.get('settings')), { ...legacy, beginnerGuides: true });
+  assert.deepEqual(JSON.parse(durable.get('settings')), { ...legacy, beginnerGuides: true, onboarded: false });
 });
+
+for (const onboarded of [false, true]) {
+  test(`onboarded=${onboarded} survives save, snapshot, and a fresh load`, async () => {
+    const { store, durable, context } = await loaded();
+    const input = settings({ defaultOrder: 2, onboarded });
+    const expected = { ...input };
+    await store.saveSettings(input);
+    assert.deepEqual(plain(store.settings), expected);
+    assert.deepEqual(JSON.parse(durable.get('settings')), expected);
+    const reloaded = new CubeStore();
+    await reloaded.load(context);
+    assert.deepEqual(plain(reloaded.settings), expected);
+    assert.equal(reloaded.settings.onboarded, onboarded);
+  });
+}
 
 for (const beginnerGuides of [false, true]) {
   test(`beginnerGuides=${beginnerGuides} survives save, snapshot, and a fresh load`, async () => {
