@@ -727,6 +727,54 @@
     {
       "name": "teaching_goal_rules",
       "value": "About hints"
+    },
+    {
+      "name": "splash_guide_title",
+      "value": "Gesture control"
+    },
+    {
+      "name": "splash_guide_subtitle",
+      "value": "Turn layers with simple swipes"
+    },
+    {
+      "name": "splash_guide_step1_title",
+      "value": "Swipe horizontally to turn columns"
+    },
+    {
+      "name": "splash_guide_step1_desc",
+      "value": "Swipe your finger left or right across the cube surface, then release to complete the column turn"
+    },
+    {
+      "name": "splash_guide_step2_title",
+      "value": "Swipe vertically to turn rows"
+    },
+    {
+      "name": "splash_guide_step2_desc",
+      "value": "Swipe your finger up or down across the cube surface, then release to complete the row turn"
+    },
+    {
+      "name": "splash_guide_step3_title",
+      "value": "Drag to rotate view"
+    },
+    {
+      "name": "splash_guide_step3_desc",
+      "value": "Drag the background area or use two fingers to freely rotate and view all sides of the cube"
+    },
+    {
+      "name": "splash_guide_next",
+      "value": "Next"
+    },
+    {
+      "name": "splash_guide_previous",
+      "value": "Previous"
+    },
+    {
+      "name": "splash_guide_skip",
+      "value": "Skip"
+    },
+    {
+      "name": "splash_guide_start",
+      "value": "Get started"
     }
   ]
 }

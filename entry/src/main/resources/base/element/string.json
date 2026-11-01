@@ -727,6 +727,54 @@
     {
       "name": "teaching_goal_rules",
       "value": "关于提示"
+    },
+    {
+      "name": "splash_guide_title",
+      "value": "手势操作魔方"
+    },
+    {
+      "name": "splash_guide_subtitle",
+      "value": "通过简单的滑动完成魔方转层"
+    },
+    {
+      "name": "splash_guide_step1_title",
+      "value": "左右滑动转动列"
+    },
+    {
+      "name": "splash_guide_step1_desc",
+      "value": "在魔方表面横向滑动手指，松手后完成该列的转动"
+    },
+    {
+      "name": "splash_guide_step2_title",
+      "value": "上下滑动转动行"
+    },
+    {
+      "name": "splash_guide_step2_desc",
+      "value": "在魔方表面纵向滑动手指，松手后完成该行的转动"
+    },
+    {
+      "name": "splash_guide_step3_title",
+      "value": "拖动旋转视角"
+    },
+    {
+      "name": "splash_guide_step3_desc",
+      "value": "拖动背景区域或使用双指，可自由旋转查看魔方各个面"
+    },
+    {
+      "name": "splash_guide_next",
+      "value": "下一步"
+    },
+    {
+      "name": "splash_guide_previous",
+      "value": "上一步"
+    },
+    {
+      "name": "splash_guide_skip",
+      "value": "跳过"
+    },
+    {
+      "name": "splash_guide_start",
+      "value": "开始体验"
     }
   ]
 }

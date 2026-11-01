@@ -15,6 +15,7 @@ export class CubeSettings {
   sound: boolean = true;
   haptics: boolean = true;
   beginnerGuides: boolean = true;
+  splashGuideSeen: boolean = false;
 }
 
 export class SolveRecord {
@@ -60,7 +61,8 @@ function isValidSettings(settings: CubeSettings): boolean {
     typeof settings.speed === 'number' && Number.isFinite(settings.speed) &&
     settings.speed >= 0.5 && settings.speed <= 2 &&
     typeof settings.sound === 'boolean' && typeof settings.haptics === 'boolean' &&
-    (settings.beginnerGuides === undefined || typeof settings.beginnerGuides === 'boolean');
+    (settings.beginnerGuides === undefined || typeof settings.beginnerGuides === 'boolean') &&
+    (settings.splashGuideSeen === undefined || typeof settings.splashGuideSeen === 'boolean');
 }
 
 function isValidRecord(record: SolveRecord): boolean {
@@ -138,6 +140,7 @@ function copySettings(settings: CubeSettings): CubeSettings {
   copy.haptics = settings.haptics;
   // Older preferences predate beginner guides; keep their other choices intact.
   copy.beginnerGuides = settings.beginnerGuides === undefined ? true : settings.beginnerGuides;
+  copy.splashGuideSeen = settings.splashGuideSeen === undefined ? false : settings.splashGuideSeen;
   return copy;
 }
 
