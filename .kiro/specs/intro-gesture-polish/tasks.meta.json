@@ -1,0 +1,156 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Add module constants and the `demoStageHeight` helper": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430160
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504437003
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504499542
+      }
+    ],
+    "1.2 Add `stageHeight` / `demoGuideStale` state and rewrite `demoFrame`": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430196
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504503309
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504589849
+      }
+    ],
+    "2.1 Build the `Column` root with Content_Scroll and the fixed Bottom_Bar": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430252
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504598044
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504880749
+      }
+    ],
+    "2.2 Rework the Demo_Stage: bottom-right badge, adaptive height, Canvas resize handling": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430281
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504907694
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793505049232
+      }
+    ],
+    "2.3 Replace `gestureRow` with the `gestureCard` builder and finish the token mapping": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430333
+      }
+    ],
+    "3. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430363
+      }
+    ],
+    "4.1 Create the test harness and source extraction": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430394
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504504141
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504590458
+      }
+    ],
+    "4.5 Write source-shape checks for IntroPage.ets": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430446
+      }
+    ],
+    "5.1 Run the full node test suite and fix failures": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430478
+      }
+    ],
+    "5.2 Run the debug build per AGENTS.md and fix compile errors": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430510
+      }
+    ],
+    "6. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504430541
+      }
+    ],
+    "1. Update the demo camera, stage-height helper, and demo loop in IntroPage.ets": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504589897
+      }
+    ],
+    "4.2 Write property test for front-face, axis-aligned demo guides": [
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504894439
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793504907722
+      },
+      {
+        "executionId": "e5391b08-7c0e-48e0-adce-db04f8deb5c4",
+        "chatSessionId": "sess_c56e8b7c-51b5-4374-aa88-d1d58d48af20",
+        "timestamp": 1793505050098
+      }
+    ]
+  }
+}

@@ -1,20 +1,34 @@
 import { CubeModel, CubeMove } from '../model/CubeModel';
 import { CubeRenderer, CubeSwipeGuide } from '../render/CubeRenderer';
-import { CubeFont, CubeRadius, CubeSpace, CubeTheme } from '../pages/CubeTheme';
+import { CubeFont, CubeLayout, CubeRadius, CubeSpace, CubeTheme } from '../pages/CubeTheme';
 import { CubeButtons } from '../pages/CubeStyles';
 import { BrandMark } from './CubeWidgets';
 
+// Demo-only camera, closer to front-on so the swiped layer reads clearly.
+// The game camera in Index.ets (0.62 / -0.42) is intentionally unchanged.
+const DEMO_YAW: number = 0.22;
+const DEMO_PITCH: number = -0.22;
 // One gesture cycle: press, swipe while the layer follows, release, hold the result.
-const DEMO_YAW: number = 0.62;
-const DEMO_PITCH: number = -0.42;
 const DEMO_CYCLE_MS: number = 2200;
 const DEMO_PRESS_MS: number = 350;
 const DEMO_TRAVEL_MS: number = 1250;
 const DEMO_RELEASE_MS: number = 300;
+// Demo stage height follows the page height, clamped to a readable range.
+const DEMO_STAGE_MIN: number = 220;
+const DEMO_STAGE_MAX: number = 360;
+const DEMO_STAGE_DEFAULT: number = 300;
+const DEMO_STAGE_RATIO: number = 0.4;
+const CONTENT_MAX_WIDTH: number = 520;
+
+export function demoStageHeight(pageHeight: number): number {
+  if (!Number.isFinite(pageHeight) || pageHeight <= 0) { return DEMO_STAGE_DEFAULT; }
+  return Math.max(DEMO_STAGE_MIN, Math.min(DEMO_STAGE_MAX, Math.round(pageHeight * DEMO_STAGE_RATIO)));
+}
 
 @Component
 export struct IntroPage {
   onDone: () => void = () => {};
+  @State stageHeight: number = DEMO_STAGE_DEFAULT;
 
   // The demo owns a separate model/renderer pair: it never touches the game cube.
   private demoModel: CubeModel = new CubeModel(3);
@@ -27,6 +41,8 @@ export struct IntroPage {
   private demoStarted: number = -1;
   private demoCycle: number = -1;
   private demoGuide: CubeSwipeGuide | null = null;
+  // Set on a cycle change or Canvas resize; the next frame redraws a rest frame and refetches the guide.
+  private demoGuideStale: boolean = true;
   private demoTimer: number = -1;
   private readonly demoBase: CubeMove[] = [new CubeMove('y', 1, 1), new CubeMove('x', 1, 1)];
 
@@ -54,14 +70,20 @@ export struct IntroPage {
     if (cycle !== this.demoCycle) {
       if (this.demoCycle >= 0) { this.demoModel.applyMove(this.demoMove(this.demoCycle), false); }
       this.demoCycle = cycle;
+      this.demoGuideStale = true;
+    }
+    // A rest frame is required: getSwipeGuide only answers for a stable, current frame.
+    if (this.demoGuideStale) {
+      this.demoGuideStale = false;
       this.demoRenderer.draw(this.demoContext, this.demoWidth, this.demoHeight,
         this.demoModel, DEMO_YAW, DEMO_PITCH);
       this.demoGuide = this.demoRenderer.getSwipeGuide(this.demoMove(cycle));
     }
     const travel = Math.max(0, Math.min(1, (t - DEMO_PRESS_MS) / DEMO_TRAVEL_MS));
     const progress = travel * travel * (3 - 2 * travel);
+    const move = this.demoMove(cycle);
     this.demoRenderer.draw(this.demoContext, this.demoWidth, this.demoHeight,
-      this.demoModel, DEMO_YAW, DEMO_PITCH, this.demoMove(cycle), progress);
+      this.demoModel, DEMO_YAW, DEMO_PITCH, move, progress);
     this.drawTouch(t, progress);
   }
 
@@ -110,73 +132,87 @@ export struct IntroPage {
   }
 
   @Builder
-  private gestureRow(icon: Resource, title: ResourceStr, description: ResourceStr) {
+  private gestureCard(icon: Resource, title: ResourceStr, description: ResourceStr) {
     Row({ space: CubeSpace.s }) {
       Stack({ alignContent: Alignment.Center }) {
-        SymbolGlyph(icon).fontSize(20).fontColor([CubeTheme.green])
-      }.width(44).height(44).backgroundColor(CubeTheme.mint).borderRadius(CubeRadius.m)
-      Column({ space: 3 }) {
+        SymbolGlyph(icon).fontSize(CubeFont.headline).fontColor([CubeTheme.green])
+      }.width(CubeLayout.touchTarget).height(CubeLayout.touchTarget)
+        .backgroundColor(CubeTheme.mint).borderRadius(CubeRadius.m)
+      Column({ space: CubeSpace.xxs }) {
         Text(title).fontSize(CubeFont.subhead).fontWeight(FontWeight.Medium).fontColor(CubeTheme.ink)
-        Text(description).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary).lineHeight(17)
+        Text(description).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-    }.width('100%')
+    }.width('100%').padding(CubeSpace.m).backgroundColor(CubeTheme.surface).borderRadius(CubeRadius.l)
   }
 
   build() {
-    Scroll() {
-      Column({ space: CubeSpace.m }) {
-        Row({ space: 10 }) {
-          BrandMark()
-          Column({ space: 2 }) {
-            Text($r('app.string.brand_name')).fontSize(CubeFont.label).letterSpacing(1.5)
-              .fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
-            Text($r('app.string.brand_tagline')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
-          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        }.width('100%').height(44)
-        Column({ space: CubeSpace.xs }) {
-          Text($r('app.string.intro_title')).fontSize(CubeFont.title).fontWeight(FontWeight.Bold)
-            .fontColor(CubeTheme.ink).textAlign(TextAlign.Center)
-          Text($r('app.string.intro_subtitle')).fontSize(CubeFont.body).fontColor(CubeTheme.secondary)
-            .textAlign(TextAlign.Center)
-        }.width('100%')
-        Stack({ alignContent: Alignment.Bottom }) {
-          Canvas(this.demoContext)
-            .id('intro-demo-canvas')
-            .width('100%')
-            .height('100%')
-            .hitTestBehavior(HitTestMode.None)
-            .accessibilityLevel('no')
-            .onReady(() => { this.demoReady = true; })
-            .onDisAppear(() => { this.demoReady = false; })
-            .onAreaChange((_old: Area, area: Area) => {
-              this.demoWidth = Number(area.width);
-              this.demoHeight = Number(area.height);
-            })
-          Text($r('app.string.intro_demo_badge')).fontSize(CubeFont.caption).fontColor(CubeTheme.green)
-            .padding({ left: 10, right: 10, top: 4, bottom: 4 }).margin({ bottom: CubeSpace.s })
-            .backgroundColor(CubeTheme.overlay).borderRadius(CubeRadius.m)
-            .hitTestBehavior(HitTestMode.None)
-        }.width('100%').height(300)
-          .linearGradient({ angle: 135, colors: [[CubeTheme.stageStart, 0], [CubeTheme.stageEnd, 1]] })
-          .borderRadius(28).clip(true)
-          .accessibilityText($r('app.string.intro_stage_accessibility'))
-        Column({ space: CubeSpace.s }) {
-          this.gestureRow($r('sys.symbol.hand_tap'), $r('app.string.intro_swipe_title'),
-            $r('app.string.intro_swipe_desc'))
-          this.gestureRow($r('sys.symbol.arrow_counterclockwise'), $r('app.string.intro_orbit_title'),
-            $r('app.string.intro_orbit_desc'))
-        }.width('100%')
+    Column() {
+      Scroll() {
+        Column({ space: CubeSpace.m }) {
+          Row({ space: CubeSpace.s }) {
+            BrandMark()
+            Column({ space: CubeSpace.xxs }) {
+              Text($r('app.string.brand_name')).fontSize(CubeFont.label).letterSpacing(1.5)
+                .fontWeight(FontWeight.Bold).fontColor(CubeTheme.ink)
+              Text($r('app.string.brand_tagline')).fontSize(CubeFont.caption).fontColor(CubeTheme.secondary)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          }.width('100%').constraintSize({ minHeight: CubeLayout.touchTarget })
+          Column({ space: CubeSpace.xs }) {
+            Text($r('app.string.intro_title')).fontSize(CubeFont.title).fontWeight(FontWeight.Bold)
+              .fontColor(CubeTheme.ink).textAlign(TextAlign.Center)
+            Text($r('app.string.intro_subtitle')).fontSize(CubeFont.body).fontColor(CubeTheme.secondary)
+              .textAlign(TextAlign.Center)
+          }.width('100%')
+          // Demo_Stage: the badge sits in the bottom-right corner, clear of the cube.
+          Stack({ alignContent: Alignment.BottomEnd }) {
+            Canvas(this.demoContext)
+              .id('intro-demo-canvas')
+              .width('100%')
+              .height('100%')
+              .hitTestBehavior(HitTestMode.None)
+              .accessibilityLevel('no')
+              .onReady(() => { this.demoReady = true; })
+              .onDisAppear(() => { this.demoReady = false; })
+              .onAreaChange((_old: Area, area: Area) => {
+                this.demoWidth = Number(area.width);
+                this.demoHeight = Number(area.height);
+                this.demoGuideStale = true;
+              })
+            Text($r('app.string.intro_demo_badge')).fontSize(CubeFont.caption).fontColor(CubeTheme.green)
+              .padding({ left: CubeSpace.xs, right: CubeSpace.xs, top: CubeSpace.xxs, bottom: CubeSpace.xxs })
+              .margin({ right: CubeSpace.s, bottom: CubeSpace.s })
+              .backgroundColor(CubeTheme.overlay).borderRadius(CubeRadius.m)
+              .hitTestBehavior(HitTestMode.None)
+          }.width('100%').height(this.stageHeight)
+            .linearGradient({ angle: 135, colors: [[CubeTheme.stageStart, 0], [CubeTheme.stageEnd, 1]] })
+            .borderRadius(CubeRadius.xl).clip(true)
+            .accessibilityText($r('app.string.intro_stage_accessibility'))
+          Column({ space: CubeSpace.s }) {
+            this.gestureCard($r('sys.symbol.hand_tap'), $r('app.string.intro_swipe_title'),
+              $r('app.string.intro_swipe_desc'))
+            this.gestureCard($r('sys.symbol.arrow_counterclockwise'), $r('app.string.intro_orbit_title'),
+              $r('app.string.intro_orbit_desc'))
+          }.width('100%')
+        }.width('100%').constraintSize({ maxWidth: CONTENT_MAX_WIDTH })
+          .padding({ left: CubeSpace.l, right: CubeSpace.l, top: CubeSpace.s, bottom: CubeSpace.m })
+      }.width('100%').layoutWeight(1).scrollBar(BarState.Off).align(Alignment.Top)
+      // Bottom_Bar: outside the Scroll, so the start button never scrolls away or gets covered.
+      Column() {
         Button({ type: ButtonType.Normal }) {
           Row({ space: CubeSpace.xs }) {
             Text($r('app.string.intro_start')).fontSize(CubeFont.headline).fontWeight(FontWeight.Bold)
               .fontColor(CubeTheme.onAccent)
-            SymbolGlyph($r('sys.symbol.arrow_right')).fontSize(20).fontColor([CubeTheme.onAccent])
+            SymbolGlyph($r('sys.symbol.arrow_right')).fontSize(CubeFont.headline).fontColor([CubeTheme.onAccent])
           }
         }.width('100%').attributeModifier(CubeButtons.hero).id('intro-start')
           .accessibilityText($r('app.string.intro_start'))
           .onClick(() => this.onDone())
-      }.width('100%').constraintSize({ maxWidth: 520 })
-        .padding({ left: 22, right: 22, top: 12, bottom: 22 })
-    }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
+      }.width('100%').constraintSize({ maxWidth: CONTENT_MAX_WIDTH })
+        .padding({ left: CubeSpace.l, right: CubeSpace.l, top: CubeSpace.s, bottom: CubeSpace.m })
+    }.width('100%').height('100%').alignItems(HorizontalAlign.Center)
+      .onAreaChange((_old: Area, area: Area) => {
+        const next = demoStageHeight(Number(area.height));
+        if (next !== this.stageHeight) { this.stageHeight = next; }
+      })
   }
 }
