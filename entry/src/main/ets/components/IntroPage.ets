@@ -1,5 +1,5 @@
 import { CubeModel, CubeMove } from '../model/CubeModel';
-import { CubeRenderer, CubeSwipeGuide } from '../render/CubeRenderer';
+import { CubeRenderer, CubeSwipeGuide, CubeView } from '../render/CubeRenderer';
 import { CubeFont, CubeRadius, CubeSpace, CubeTheme } from '../pages/CubeTheme';
 import { CubeButtons } from '../pages/CubeStyles';
 
@@ -7,6 +7,7 @@ import { CubeButtons } from '../pages/CubeStyles';
 // The game camera in Index.ets (0.62 / -0.42) is intentionally unchanged.
 const DEMO_YAW: number = 0.22;
 const DEMO_PITCH: number = -0.22;
+const DEMO_VIEW: CubeView = CubeView.fromAngles(DEMO_YAW, DEMO_PITCH);
 // One gesture cycle: press, swipe while the layer follows, release, hold the result.
 const DEMO_CYCLE_MS: number = 2200;
 const DEMO_PRESS_MS: number = 350;
@@ -75,14 +76,14 @@ export struct IntroPage {
     if (this.demoGuideStale) {
       this.demoGuideStale = false;
       this.demoRenderer.draw(this.demoContext, this.demoWidth, this.demoHeight,
-        this.demoModel, DEMO_YAW, DEMO_PITCH);
+        this.demoModel, DEMO_VIEW);
       this.demoGuide = this.demoRenderer.getSwipeGuide(this.demoMove(cycle));
     }
     const travel = Math.max(0, Math.min(1, (t - DEMO_PRESS_MS) / DEMO_TRAVEL_MS));
     const progress = travel * travel * (3 - 2 * travel);
     const move = this.demoMove(cycle);
     this.demoRenderer.draw(this.demoContext, this.demoWidth, this.demoHeight,
-      this.demoModel, DEMO_YAW, DEMO_PITCH, move, progress);
+      this.demoModel, DEMO_VIEW, move, progress);
     this.drawTouch(t, progress);
   }
 

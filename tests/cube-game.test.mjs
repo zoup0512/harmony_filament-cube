@@ -6,6 +6,7 @@ import { Script } from 'node:vm';
 import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
 import { resourceManager } from './resource-helper.mjs';
 import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
+import { CubeView, homeView, viewDistance } from './view-helper.mjs';
 
 const resultSource = readFileSync(new URL('../entry/src/main/ets/model/SolveResult.ets', import.meta.url), 'utf8');
 const { SolveResult } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(
@@ -49,7 +50,7 @@ for (const [name, parameters, pattern, callbackSource = source] of [
   ['guidanceMounted', "owner = 'game'", /\.onReady\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
   ['guidanceDisappeared', "owner = 'game'", /\.onDisAppear\(\(\) => \{([^\r\n]*)\}\)/, guidanceCanvasSource],
   ['guidanceResized', 'area: Area', /\.onAreaChange\(\(_old: Area, area: Area\) => \{\r?\n([\s\S]*?)^      \}\)/m, guidanceCanvasSource],
-  ['frontView', '', /\.onClick\(\(\) => \{ (this\.invalidateGesture\(\); this\.yaw = 0\.62;[^\r\n]*) \}\)/]
+  ['frontView', '', /\.onClick\(\(\) => \{ (this\.invalidateGesture\(\); this\.view = CubeView\.fromAngles\(0\.62, -0\.42\);[^\r\n]*) \}\)/]
 ]) {
   const match = callbackSource.match(pattern);
   assert.ok(match, `${name} callback must be extractable`);
@@ -147,7 +148,7 @@ function harness(t, { order = 3, speed = 1, canvasReady = false, guideVisible = 
     }
   }
   const GameHarness = script.runInNewContext({
-    CubeModel, CubeMove, SolveResult, TeachingChallenge, createTeachingChallenges,
+    CubeModel, CubeMove, CubeView, SolveResult, TeachingChallenge, createTeachingChallenges,
     TouchType, DialogAlignment, Curve, DismissReason, Date: FakeDate, CubeStore: MockStore,
     NavPathStack: MockNavPathStack, $r: (name, ...args) => ({ resource: name, args }),
     CubeTheme: new Proxy({}, { get: (_target, token) => `theme:${String(token)}` }),
@@ -462,8 +463,7 @@ function assertChallengeReady(h, index) {
   assert.equal(s.hint, s.tr('teaching_start_hint'));
   assert.equal(s.touching, false);
   assert.equal(s.pointerCount, 0);
-  assert.equal(s.yaw, 0.62);
-  assert.equal(s.pitch, -0.42);
+  assert.ok(viewDistance(s.view, homeView()) === 0, 'front view');
   assert.equal(s.cubeZoom, 1.12);
 }
 
@@ -520,8 +520,8 @@ for (const order of [2, 3, 4, 5]) {
         clock.advance(220 / speed - 1);
         s.frame();
         assert.equal(snapshot(s.model), stepBefore, 'model commits only at the end of each turn');
-        assert.equal(calls.draw.at(-1)[6], active);
-        assert.ok(calls.draw.at(-1)[7] > 0 && calls.draw.at(-1)[7] < 1);
+        assert.equal(calls.draw.at(-1)[5], active);
+        assert.ok(calls.draw.at(-1)[6] > 0 && calls.draw.at(-1)[6] < 1);
         clock.advance(1);
         s.frame();
         expected.applyMove(move, false);
@@ -748,7 +748,7 @@ for (const [order, count] of [[2, 11], [3, 25], [4, 45], [5, 65]]) {
     assert.deepEqual(dialog.atOpen, {
       phase: 'solved', busy: false, solved: true, elapsed: 220, moves: 1,
       activeMove: null, touching: false, saves: 0,
-      lastDraw: [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.yaw, s.pitch, null, 0, s.cubeZoom]
+      lastDraw: [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.view, null, 0, s.cubeZoom]
     }, 'open only after committing, freezing time and drawing the solved cube, before waiting on storage');
     assert.equal(calls.records.length, 1);
     assert.deepEqual({ ...calls.records[0] }, { order, durationMs: 220, moves: 1, date: clock.now() });
@@ -833,8 +833,7 @@ test('native result is modal, blocks moves and touch, and closing preserves the 
   assert.equal(s.touching, false);
   assert.equal(s.busy, false);
   assert.equal(s.activeMove, null);
-  assert.equal(s.yaw, 0.62);
-  assert.equal(s.pitch, -0.42);
+  assert.ok(viewDistance(s.view, homeView()) === 0, 'front view');
   assert.equal(snapshot(s.model), before);
   assert.equal(s.phase, 'solved');
   assert.equal(s.moves, 1);
@@ -1189,8 +1188,8 @@ for (const kind of ['tutorial', 'history']) {
       clock.fire(s.clockTimer);
       assert.deepEqual(calls.drawGuide.at(-1), [s.guidanceContext, guide, progress, kind !== 'tutorial']);
       assert.equal(calls.getSwipeGuide.at(-1)[0], target);
-      assert.equal(calls.draw.at(-1)[6], null, 'guide progress must not animate a cube turn');
-      assert.equal(calls.draw.at(-1)[8], s.cubeZoom);
+      assert.equal(calls.draw.at(-1)[5], null, 'guide progress must not animate a cube turn');
+      assert.equal(calls.draw.at(-1)[7], s.cubeZoom);
     }
     assert.equal(calls.draw.length, draws, 'hint frames never repaint the base cube');
     assert.equal(calls.drawBeginnerGuides.length, corners);
@@ -1499,7 +1498,7 @@ test('each committed lesson step restarts the hand; setup, busy and completed st
   s.draw();
   assert.equal(calls.drawGuide.length, guides, 'completed tutorial has no target hand');
   const draw = calls.draw.at(-1);
-  assert.deepEqual(draw, [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.yaw, s.pitch, null, 0, s.cubeZoom]);
+  assert.deepEqual(draw, [s.context2d, s.canvasWidth, s.canvasHeight, s.model, s.view, null, 0, s.cubeZoom]);
 });
 
 for (const followHint of [true, false]) {
@@ -2146,8 +2145,7 @@ test('retry reloads the exact baseline and clears timer, counters, hint, assista
   s.onForegroundChanged();
   s.showHint();
   assert.equal(s.assisted, true);
-  s.yaw = 1.3;
-  s.pitch = 0.8;
+  s.view = CubeView.fromAngles(1.3, 0.8);
   s.retryChallenge();
   const session = s.sessionId;
   const before = snapshot(s.model);
@@ -2579,8 +2577,7 @@ test('passed teaching board supports view inspection without layer moves or begi
   assert.equal(s.orbiting, true, 'a passed cube hit begins view inspection, not a layer gesture');
   touch(h, TouchType.Move, 140, 120);
   touch(h, TouchType.Up, 160, 130);
-  assert.ok(Math.abs(s.yaw - (0.62 - 60 * 0.009)) < 1e-12);
-  assert.ok(Math.abs(s.pitch - (-0.42 - 30 * 0.009)) < 1e-12);
+  assert.ok(viewDistance(s.view, homeView().orbit(40, 20).orbit(20, 10)) < 1e-12);
   assert.equal(snapshot(s.model), before);
   assert.equal(s.phase, 'solved');
   assert.equal(s.moves, 1);

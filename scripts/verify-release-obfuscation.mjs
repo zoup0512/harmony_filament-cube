@@ -56,7 +56,7 @@ try {
   for (const [file, originals] of [
     ['model/CubeModel.ts', ['CubeModel', 'CubeMove']],
     ['model/CubeTeaching.ts', ['TeachingChallenge', 'createTeachingChallenges']],
-    ['render/CubeRenderer.ets', ['CubeRenderer']],
+    ['render/CubeRenderer.ets', ['CubeRenderer', 'CubeView']],
     ['storage/CubeStore.ets', ['CubeStore', 'CubeSettings', 'SolveRecord', 'TeachingRecord']],
     ['platform/CubeFeedback.ets', ['CubeFeedback']]
   ]) {
@@ -68,7 +68,7 @@ try {
     }
   }
   check(exports.some(match => match[1] === 'EntryAbility' && match[2] === 'default'), 'EntryAbility default export must remain');
-  for (const field of ['defaultOrder', 'speed', 'sound', 'haptics', 'beginnerGuides', 'order', 'durationMs', 'moves', 'date',
+  for (const field of ['defaultOrder', 'speed', 'sound', 'haptics', 'beginnerGuides', 'onboarded', 'order', 'durationMs', 'moves', 'date',
     'challengeId', 'assisted', 'teachingRecords', 'onForegroundChanged']) {
     check(disassembly.includes(`"${field}"`), `${field} must retain its runtime property name`);
   }
@@ -119,20 +119,21 @@ try {
   check(rendererImports.length === 2, 'compiled renderer must use the actual model imports');
   const rendererModule = await import(moduleUrl(rendererSource.replaceAll(rendererImports[0][0], JSON.stringify(modelUrl))));
   const CubeRenderer = rendererModule[symbols.CubeRenderer];
+  const view = rendererModule[symbols.CubeView].fromAngles(0.62, -0.42);
   const context = new Proxy({}, { get: () => () => {} });
   let guides = 0;
   for (const order of [2, 3, 4, 5]) {
     for (const [width, height] of [[300, 260], [360, 320], [480, 380]]) {
       const cube = new CubeModel(order);
       const renderer = new CubeRenderer();
-      renderer.draw(context, width, height, cube, 0.62, -0.42);
+      renderer.draw(context, width, height, cube, view);
       for (const scale of [1, 1.5, 2, 2.75, 3.5]) {
         for (const [axis, layer, turns] of [['y', order - 1, -1], ['x', order - 1, -1], ['y', 0, 1],
           ['x', 0, -1], ['z', order - 1, -1], ['y', order - 1, 1], ['x', order - 1, 1]]) {
           const guide = renderer.getSwipeGuide(new CubeMove(axis, layer, turns));
           check(guide !== null, 'obfuscated renderer must produce a visible guide');
           const points = [guide.startX, guide.startY, guide.endX, guide.endY].map(value => Math.round(value * scale) / scale);
-          const picked = renderer.pickMove(...points, cube, 0.62, -0.42);
+          const picked = renderer.pickMove(...points, cube, view);
           check(picked?.axis === axis && picked.layer === layer && picked.turns === turns,
             'pixel-quantized guide must select the original turn through obfuscated imports');
           guides++;
@@ -170,7 +171,7 @@ try {
   const TeachingRecord = storageModule[symbols.TeachingRecord];
   for (const legacy of [true, false]) {
     const settings = { defaultOrder: 5, speed: 1.7, sound: true, haptics: false };
-    if (!legacy) settings.beginnerGuides = false;
+    if (!legacy) Object.assign(settings, { beginnerGuides: false, onboarded: true });
     const record = { order: 3, durationMs: 12345, moves: 42, date: 1000 };
     const data = new Map([['settings', JSON.stringify(settings)], ['records', JSON.stringify([record])]]);
     const context = { async open(options) {
@@ -180,7 +181,7 @@ try {
     } };
     const store = new CubeStore();
     await store.load(context);
-    const expected = { ...settings, beginnerGuides: legacy };
+    const expected = { ...settings, beginnerGuides: legacy, onboarded: !legacy };
     assert.deepEqual(plain(store.settings), expected);
     assert.deepEqual(plain(store.records), [record]);
     await store.saveSettings(store.settings);

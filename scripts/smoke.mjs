@@ -408,19 +408,19 @@ async function loadGeometry() {
   if (!rendererSource.includes("'../model/CubeModel'")) throw new Error('Renderer model import changed; update the smoke loader explicitly.');
   const rendererUrl = moduleUrl(rendererSource.replaceAll("'../model/CubeModel'", JSON.stringify(modelUrl)), rendererPath);
   const { CubeModel, CubeMove } = await import(modelUrl);
-  const { CubeRenderer } = await import(rendererUrl);
+  const { CubeRenderer, CubeView } = await import(rendererUrl);
   if (typeof CubeRenderer.prototype.getSwipeGuide !== 'function') throw new Error('Actual CubeRenderer must implement getSwipeGuide(move).');
-  geometryApi = { CubeModel, CubeMove, CubeRenderer };
+  geometryApi = { CubeModel, CubeMove, CubeRenderer, at: (yaw, pitch) => CubeView.fromAngles(yaw, pitch) };
   return geometryApi;
 }
 function drawGeometry(order, width, height, yaw = 0.62, pitch = -0.42) {
-  const { CubeModel, CubeRenderer } = geometryApi;
+  const { CubeModel, CubeRenderer, at } = geometryApi;
   const model = new CubeModel(order);
   const renderer = new CubeRenderer();
   // Only drawing calls are mocked: projection, hit testing and gesture picking are real.
   const ctx = Object.fromEntries(['save', 'restore', 'clearRect', 'beginPath', 'moveTo', 'lineTo',
     'closePath', 'fill', 'stroke'].map(name => [name, () => {}]));
-  renderer.draw(ctx, width, height, model, yaw, pitch);
+  renderer.draw(ctx, width, height, model, at(yaw, pitch));
   return { renderer, model, width, height, yaw, pitch };
 }
 function faceMove(face, order) {
@@ -433,6 +433,7 @@ function faceMove(face, order) {
 }
 function guidePixels(geometry, face, canvasBounds, scale) {
   const { renderer, model, width, height, yaw, pitch } = geometry;
+  const { at } = geometryApi;
   const move = faceMove(face, model.order);
   const guide = renderer.getSwipeGuide(move);
   if (!guide || !['startX', 'startY', 'endX', 'endY'].every(key => Number.isFinite(guide[key]))) {
@@ -459,7 +460,7 @@ function guidePixels(geometry, face, canvasBounds, scale) {
       throw new Error(`ASSERTION FAILED: pixel-quantized ${face} guide leaves its surface/layer at ${yaw}/${pitch}`);
     }
   }
-  const picked = renderer.pickMove(...logical, model, yaw, pitch);
+  const picked = renderer.pickMove(...logical, model, at(yaw, pitch));
   if (!picked || picked.axis !== move.axis || picked.layer !== move.layer || picked.turns !== move.turns) {
     throw new Error(`ASSERTION FAILED: pixel-quantized ${face} guide picks wrong move: ${JSON.stringify({ move, picked, guide, logical })}`);
   }

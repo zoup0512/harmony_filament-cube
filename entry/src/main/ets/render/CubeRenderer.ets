@@ -95,10 +95,92 @@ class CubeVisibleFace {
 }
 
 /**
+ * Immutable world-to-camera rotation, row-major. Camera: +x right, +y up, +z toward the eye.
+ * orbit() rotates about screen axes (trackball), so every orientation is reachable and a
+ * drag always moves the front surface with the finger, with no pole or gimbal lock.
+ */
+export class CubeView {
+  static readonly RADIANS_PER_UNIT: number = 0.009;
+  readonly m: number[];
+
+  constructor(m: number[]) {
+    this.m = m;
+  }
+
+  /** Y(-yaw), then X(-pitch): a negative pitch reveals the top. */
+  static fromAngles(yaw: number, pitch: number): CubeView {
+    const cy: number = Math.cos(yaw);
+    const sy: number = Math.sin(yaw);
+    const cp: number = Math.cos(pitch);
+    const sp: number = Math.sin(pitch);
+    return new CubeView([cy, 0, -sy, sy * sp, cp, cy * sp, sy * cp, -sp, cy * cp]);
+  }
+
+  /** Screen drag in Canvas units (+y down): the surface facing the eye follows it. */
+  orbit(dx: number, dy: number): CubeView {
+    const length: number = Math.sqrt(dx * dx + dy * dy);
+    if (!Number.isFinite(length) || length < 0.000001) {
+      return this;
+    }
+    // Camera-space axis (dy, dx, 0) / length, angle = length * rate (Rodrigues).
+    const ux: number = dy / length;
+    const uy: number = dx / length;
+    const angle: number = length * CubeView.RADIANS_PER_UNIT;
+    const c: number = Math.cos(angle);
+    const s: number = Math.sin(angle);
+    const t: number = 1 - c;
+    const r: number[] = [t * ux * ux + c, t * ux * uy, s * uy,
+      t * ux * uy, t * uy * uy + c, -s * ux,
+      -s * uy, s * ux, c];
+    const m: number[] = this.m;
+    const out: number[] = [];
+    for (let row: number = 0; row < 3; row++) {
+      for (let col: number = 0; col < 3; col++) {
+        out.push(r[row * 3] * m[col] + r[row * 3 + 1] * m[3 + col] + r[row * 3 + 2] * m[6 + col]);
+      }
+    }
+    return CubeView.orthonormal(out);
+  }
+
+  isFinite(): boolean {
+    return this.m.length === 9 && this.m.every((value: number): boolean => Number.isFinite(value));
+  }
+
+  equals(other: CubeView | null): boolean {
+    if (other === null || !this.isFinite() || !other.isFinite()) {
+      return false;
+    }
+    for (let i: number = 0; i < 9; i++) {
+      if (Math.abs(this.m[i] - other.m[i]) > 0.000001) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Gram-Schmidt on the rows keeps repeated drags from accumulating skew or scale.
+  private static orthonormal(m: number[]): CubeView {
+    const xl: number = Math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    const x0: number = m[0] / xl;
+    const x1: number = m[1] / xl;
+    const x2: number = m[2] / xl;
+    const d: number = x0 * m[3] + x1 * m[4] + x2 * m[5];
+    let y0: number = m[3] - d * x0;
+    let y1: number = m[4] - d * x1;
+    let y2: number = m[5] - d * x2;
+    const yl: number = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
+    y0 /= yl;
+    y1 /= yl;
+    y2 /= yl;
+    return new CubeView([x0, x1, x2, y0, y1, y2,
+      x1 * y2 - x2 * y1, x2 * y0 - x0 * y2, x0 * y1 - x1 * y0]);
+  }
+}
+
+/**
  * Software renderer in Canvas logical units (the same units as touch coordinates).
  * World coordinates: +x right, +y up, +z front. Turns use the right-hand rule.
- * yaw/pitch are camera angles: world-to-camera applies Y(-yaw), then X(-pitch).
- * A negative pitch therefore reveals the top. The caller owns model mutation.
+ * The camera orientation is a CubeView. The caller owns model mutation.
  */
 export class CubeRenderer {
   private readonly cameraDistance: number = 6.0;
@@ -116,12 +198,8 @@ export class CubeRenderer {
   private width: number = 0;
   private height: number = 0;
   private focal: number = 1;
-  private lastYaw: number = 0;
-  private lastPitch: number = 0;
-  private yawCos: number = 1;
-  private yawSin: number = 0;
-  private pitchCos: number = 1;
-  private pitchSin: number = 0;
+  private lastView: CubeView | null = null;
+  private rotation: number[] = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   private animating: boolean = false;
   private cachedCubies: Cubelet[] = [];
   private cachedCoordinates: number[] = [];
@@ -129,10 +207,11 @@ export class CubeRenderer {
   private cachedGuide: CubeSwipeGuide | null = null;
 
   draw(ctx: CanvasRenderingContext2D, width: number, height: number, model: CubeModel,
-    yaw: number, pitch: number, move: CubeMove | null = null, progress: number = 0,
+    view: CubeView, move: CubeMove | null = null, progress: number = 0,
     zoom: number = 1): void {
     this.faces = [];
     this.lastModel = null;
+    this.lastView = null;
     this.cachedGuideMove = null;
     this.cachedGuide = null;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
@@ -142,8 +221,7 @@ export class CubeRenderer {
     // Clear rather than painting a backdrop: the ArkUI scene remains visible.
     ctx.clearRect(0, 0, width, height);
     ctx.globalAlpha = 1;
-    if (!Number.isFinite(yaw) || !Number.isFinite(pitch) ||
-      !Number.isInteger(model.order) || model.order < 1) {
+    if (!view.isFinite() || !Number.isInteger(model.order) || model.order < 1) {
       ctx.restore();
       return;
     }
@@ -151,12 +229,8 @@ export class CubeRenderer {
     this.height = height;
     this.focal = Math.min(width, height) * 1.48 *
       (Number.isFinite(zoom) ? Math.max(1, zoom) : 1);
-    this.lastYaw = yaw;
-    this.lastPitch = pitch;
-    this.yawCos = Math.cos(yaw);
-    this.yawSin = Math.sin(yaw);
-    this.pitchCos = Math.cos(pitch);
-    this.pitchSin = Math.sin(pitch);
+    this.lastView = view;
+    this.rotation = view.m.slice();
     this.lastModel = model;
     this.lastOrder = model.order;
     this.animating = move !== null;
@@ -232,12 +306,10 @@ export class CubeRenderer {
   }
 
   pickMove(startX: number, startY: number, endX: number, endY: number,
-    model: CubeModel, yaw: number, pitch: number): CubeMove | null {
+    model: CubeModel, view: CubeView): CubeMove | null {
     // Never infer against stale camera/model geometry or an in-flight layer.
     if (!this.cacheIsCurrent() || this.lastModel !== model || this.lastOrder !== model.order ||
-      !Number.isFinite(yaw) || !Number.isFinite(pitch) ||
-      Math.abs(yaw - this.lastYaw) > 0.000001 || Math.abs(pitch - this.lastPitch) > 0.000001 ||
-      !Number.isFinite(endX) || !Number.isFinite(endY)) {
+      !view.equals(this.lastView) || !Number.isFinite(endX) || !Number.isFinite(endY)) {
       return null;
     }
     let hit: CubeSurfaceHit | null = this.boxHit(startX, startY);
@@ -302,7 +374,8 @@ export class CubeRenderer {
   /** Current stable frame only. Null means the UI should ask for another view. */
   getSwipeGuide(move: CubeMove): CubeSwipeGuide | null {
     let model: CubeModel | null = this.lastModel;
-    if (model === null || !this.cacheIsCurrent() || move.layer >= model.order ||
+    let view: CubeView | null = this.lastView;
+    if (model === null || view === null || !this.cacheIsCurrent() || move.layer >= model.order ||
       move.layer < 0 || !Number.isInteger(move.layer) || Math.abs(move.turns) !== 1) {
       return null;
     }
@@ -377,7 +450,7 @@ export class CubeRenderer {
             continue;
           }
           let picked: CubeMove | null = this.pickMove(x, y, guide.endX, guide.endY,
-            model, this.lastYaw, this.lastPitch);
+            model, view);
           if (picked === null || picked.axis !== move.axis || picked.layer !== move.layer ||
             picked.turns !== move.turns) {
             continue;
@@ -410,7 +483,8 @@ export class CubeRenderer {
   getBeginnerGuides(): CubeSwipeGuide[] {
     const guides: CubeSwipeGuide[] = [];
     const model: CubeModel | null = this.lastModel;
-    if (model === null || !this.cacheIsCurrent()) { return guides; }
+    const view: CubeView | null = this.lastView;
+    if (model === null || view === null || !this.cacheIsCurrent()) { return guides; }
     const last: number = model.order - 1;
     const axes: string[] = ['x', 'y', 'z'];
     for (let i: number = 0; i < this.faces.length; i++) {
@@ -456,7 +530,7 @@ export class CubeRenderer {
         const ux: number = sign * tangent.x / length;
         const uy: number = sign * tangent.y / length;
         const picked: CubeMove | null = this.pickMove(x, y, x + ux * 55, y + uy * 55,
-          model, this.lastYaw, this.lastPitch);
+          model, view);
         if (picked === null || picked.axis !== axis ||
           picked.layer !== this.layerCoordinate(face.cubie, axis) || picked.turns !== sign) { continue; }
         guides.push(new CubeSwipeGuide(x, y, x + ux * radius, y + uy * radius));
@@ -660,17 +734,16 @@ export class CubeRenderer {
   }
 
   private toCamera(p: CubeVector3): CubeVector3 {
-    let x: number = p.x * this.yawCos - p.z * this.yawSin;
-    let z: number = p.x * this.yawSin + p.z * this.yawCos;
-    return new CubeVector3(x, p.y * this.pitchCos + z * this.pitchSin,
-      -p.y * this.pitchSin + z * this.pitchCos);
+    let m: number[] = this.rotation;
+    return new CubeVector3(m[0] * p.x + m[1] * p.y + m[2] * p.z,
+      m[3] * p.x + m[4] * p.y + m[5] * p.z, m[6] * p.x + m[7] * p.y + m[8] * p.z);
   }
 
+  // Orthonormal rotation: the inverse is the transpose.
   private fromCamera(p: CubeVector3): CubeVector3 {
-    let y: number = p.y * this.pitchCos - p.z * this.pitchSin;
-    let z: number = p.y * this.pitchSin + p.z * this.pitchCos;
-    return new CubeVector3(p.x * this.yawCos + z * this.yawSin, y,
-      -p.x * this.yawSin + z * this.yawCos);
+    let m: number[] = this.rotation;
+    return new CubeVector3(m[0] * p.x + m[3] * p.y + m[6] * p.z,
+      m[1] * p.x + m[4] * p.y + m[7] * p.z, m[2] * p.x + m[5] * p.y + m[8] * p.z);
   }
 
   private project(p: CubeVector3): CubePoint2 {

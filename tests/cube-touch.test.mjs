@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { CubeModel, CubeMove } from '../entry/src/main/ets/model/CubeModel.ts';
 import { resourceManager } from './resource-helper.mjs';
 import { TeachingChallenge, createTeachingChallenges } from './teaching-helper.mjs';
+import { CubeView, homeView, viewDistance } from './view-helper.mjs';
 
 const resultSource = readFileSync(new URL('../entry/src/main/ets/model/SolveResult.ets', import.meta.url), 'utf8');
 const { SolveResult } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(
@@ -34,7 +35,7 @@ const TouchType = Object.freeze({ Down: 0, Up: 1, Move: 2, Cancel: 3 });
 const GestureJudgeResult = Object.freeze({ CONTINUE: 0, REJECT: 1 });
 const GestureControl = Object.freeze({ GestureType: { PAN_GESTURE: 2, TAP_GESTURE: 0 } });
 const TouchHarness = runInNewContext(executable, {
-  TouchType, GestureJudgeResult, GestureControl, CubeModel, SolveResult, TeachingChallenge, createTeachingChallenges,
+  TouchType, GestureJudgeResult, GestureControl, CubeModel, CubeView, SolveResult, TeachingChallenge, createTeachingChallenges,
   CubeRenderer: class {}, CubeStore: class {}, CubeFeedback: class {},
   CanvasRenderingContext2D: class {}, RenderingContextSettings: class {},
   NavPathStack: class { getAllPathName() { return []; } }
@@ -89,9 +90,10 @@ function up(h, x = 160, y = 120) {
   const p = point(42, x, y);
   h.send(TouchType.Up, [{ ...p }], [p]);
 }
-function assertView(h, yaw = 0.62, pitch = -0.42) {
-  near(h.state.yaw, yaw);
-  near(h.state.pitch, pitch);
+/** Each [dx, dy] is one applied orbit increment, in order (trackball turns do not commute). */
+function assertView(h, ...steps) {
+  const expected = steps.reduce((view, [dx, dy]) => view.orbit(dx, dy), homeView());
+  assert.ok(viewDistance(h.state.view, expected) < 1e-12, JSON.stringify(h.state.view.m));
 }
 
 for (const inclusive of [true, false]) {
@@ -103,7 +105,7 @@ for (const inclusive of [true, false]) {
     assert.deepEqual(h.calls.hitTest, [[31, 47]]);
     const end = point(42, 91, 83);
     h.send(TouchType.Up, inclusive ? [{ ...end }] : [], [end]);
-    assert.deepEqual(h.calls.pickMove, [[31, 47, 91, 83, h.state.model, 0.62, -0.42]]);
+    assert.deepEqual(h.calls.pickMove, [[31, 47, 91, 83, h.state.model, h.state.view]]);
     assert.deepEqual(h.calls.requestMove, [[h.pickedMove]]);
     assertReleased(h);
     h.send(TouchType.Up, inclusive ? [{ ...end }] : [], [end]);
@@ -134,7 +136,7 @@ for (const [dx, dy] of [[60, 30], [-60, -30], [0, 30], [30, 0]]) {
     const h = harness({ hit: false });
     start(h);
     h.send(TouchType.Move, [point(42, 100 + dx, 100 + dy)]);
-    assertView(h, 0.62 - dx * 0.009, -0.42 - dy * 0.009);
+    assertView(h, [dx, dy]);
     up(h, 100 + dx, 100 + dy);
     assertNoMove(h);
     assert.equal(h.calls.draw.length, 1);
@@ -143,34 +145,66 @@ for (const [dx, dy] of [[60, 30], [-60, -30], [0, 30], [30, 0]]) {
     assertReleased(h);
   });
 }
-function wrapped(angle) {
-  return angle - Math.round(angle / (Math.PI * 2)) * Math.PI * 2;
+function toCamera(view, p) {
+  const m = view.m;
+  return [0, 1, 2].map(row => m[row * 3] * p[0] + m[row * 3 + 1] * p[1] + m[row * 3 + 2] * p[2]);
 }
-for (const dy of [1000, -1000]) {
-  test(`pitch tumbles past the poles without clamping (${dy})`, () => {
+for (const [label, dx, dy] of [['down', 0, 1], ['up', 0, -1], ['right', 1, 0], ['diagonal', -0.6, 0.8]]) {
+  test(`${label} drags tumble a full 360° without stopping at a pole`, () => {
     const h = harness({ hit: false });
     start(h);
-    h.send(TouchType.Move, [point(42, 100, 100 + dy)]);
-    near(h.state.pitch, wrapped(-0.42 - dy * 0.009));
-    assert.ok(Math.abs(h.state.pitch) <= Math.PI);
-    h.send(TouchType.Move, [point(42, 100, 100 + dy - Math.sign(dy) * 10)]);
-    near(h.state.pitch, wrapped(-0.42 - dy * 0.009 + Math.sign(dy) * 0.09));
+    const steps = 40;
+    const length = 2 * Math.PI / (CubeView.RADIANS_PER_UNIT * steps);
+    let flipped = false;
+    for (let i = 1; i <= steps; i++) {
+      h.send(TouchType.Move, [point(42, 100 + dx * length * i, 100 + dy * length * i)]);
+      // Half a turn about any screen axis reverses the facing direction.
+      if (i === steps / 2) flipped = toCamera(h.state.view, homeView().m.slice(6, 9))[2] < -0.999999;
+    }
+    assert.ok(flipped, 'halfway the original front surface faces away');
+    assert.ok(viewDistance(h.state.view, homeView()) < 1e-9, 'a full turn returns to the start view');
+    assert.equal(h.calls.draw.length, steps);
   });
 }
-test('upside-down orbit keeps horizontal drags following the finger', () => {
+for (const [label, view] of [
+  ['default', homeView()], ['straight down from the top', CubeView.fromAngles(0.62, -Math.PI / 2)],
+  ['straight up from the bottom', CubeView.fromAngles(-1.1, Math.PI / 2)],
+  ['upside down', CubeView.fromAngles(2.3, 2.8)], ['rolled', homeView().orbit(40, 70).orbit(-90, 15)]
+]) {
+  test(`${label}: drags rotate about screen axes, so the facing surface follows the finger`, () => {
+    for (const [dx, dy] of [[30, 0], [-30, 0], [0, 30], [0, -30], [24, 18]]) {
+      const h = harness({ hit: false });
+      h.state.view = view;
+      const facing = view.m.slice(6, 9);
+      start(h);
+      h.send(TouchType.Move, [point(42, 100 + dx, 100 + dy)]);
+      const [x, y, z] = toCamera(h.state.view, facing);
+      const angle = Math.hypot(dx, dy) * CubeView.RADIANS_PER_UNIT;
+      // Screen +y is down; camera +y is up.
+      near(x, Math.sin(angle) * dx / Math.hypot(dx, dy));
+      near(y, -Math.sin(angle) * dy / Math.hypot(dx, dy));
+      near(z, Math.cos(angle));
+    }
+  });
+}
+test('long mixed drags keep the view a proper rotation', () => {
   const h = harness({ hit: false });
-  h.state.pitch = 2.8;
   start(h);
-  h.send(TouchType.Move, [point(42, 160, 100)]);
-  near(h.state.yaw, 0.62 + 60 * 0.009);
-  h.send(TouchType.Move, [point(42, 160, 300)]);
-  near(h.state.pitch, wrapped(2.8 - 200 * 0.009));
-  h.send(TouchType.Move, [point(42, 170, 300)]);
-  near(h.state.yaw, 0.62 + 70 * 0.009);
-  up(h, 170, 300);
-  start(h);
-  h.send(TouchType.Move, [point(42, 160, 100)]);
-  near(h.state.yaw, 0.62 + 10 * 0.009);
+  let seed = 7;
+  let x = 100;
+  let y = 100;
+  for (let i = 0; i < 2000; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    x += (seed % 61) - 30;
+    y += ((seed >>> 8) % 61) - 30;
+    h.send(TouchType.Move, [point(42, x, y)]);
+  }
+  const m = h.state.view.m;
+  for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
+    const dot = m[a * 3] * m[b * 3] + m[a * 3 + 1] * m[b * 3 + 1] + m[a * 3 + 2] * m[b * 3 + 2];
+    near(dot, a === b ? 1 : 0);
+  }
+  near(m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]), 1);
 });
 for (const [dx, dy] of [[0, 0], [7.99, 0], [0, -8], [5, 5]]) {
   test(`orbit slop suppresses jitter (${dx}, ${dy}) through Up`, () => {
@@ -189,10 +223,10 @@ test('orbit slop accumulates from origin, then tracks small deltas', () => {
   for (const dx of [2, 4, 6, 8]) h.send(TouchType.Move, [point(42, 100 + dx, 100)]);
   assertView(h);
   h.send(TouchType.Move, [point(42, 109, 100)]);
-  assertView(h, 0.62 - 9 * 0.009);
+  assertView(h, [9, 0]);
   h.send(TouchType.Move, [point(42, 110, 101)]);
   up(h, 112, 102);
-  assertView(h, 0.62 - 12 * 0.009, -0.42 - 2 * 0.009);
+  assertView(h, [9, 0], [1, 1], [2, 1]);
   assert.equal(h.calls.draw.length, 3);
 });
 for (const inclusive of [true, false]) {
@@ -201,7 +235,7 @@ for (const inclusive of [true, false]) {
     start(h);
     const end = point(42, 130, 140);
     h.send(TouchType.Up, inclusive ? [{ ...end }] : [], [end]);
-    assertView(h, 0.62 - 30 * 0.009, -0.42 - 40 * 0.009);
+    assertView(h, [30, 40]);
     assert.equal(h.calls.draw.length, 1);
     assertNoMove(h);
     assertReleased(h);
@@ -213,7 +247,7 @@ for (const page of ['home', 'game']) {
     start(h);
     h.send(TouchType.Move, [point(42, 120, 130)]);
     up(h, 130, 140);
-    assertView(h, 0.62 - 30 * 0.009, -0.42 - 40 * 0.009);
+    assertView(h, [20, 30], [10, 10]);
     assert.equal(h.calls.draw.length, 0);
     assertNoMove(h);
   });
@@ -222,7 +256,7 @@ test('home preview orbits even when the cube is hit', () => {
   const h = harness({ page: 'home' });
   start(h);
   up(h);
-  assertView(h, 0.62 - 60 * 0.009, -0.42 - 20 * 0.009);
+  assertView(h, [60, 20]);
   assertNoMove(h);
 });
 test('busy cube Down is BLOCKED for the entire single-finger gesture', () => {
@@ -265,23 +299,21 @@ for (const initialBusy of [true, false]) {
       assertView(h);
       const moved = [a, b, c].map(p => point(p.id, p.x + 30, p.y + 20));
       h.send(TouchType.Move, moved);
-      const yaw = 0.62 - 30 * 0.009;
-      const pitch = -0.42 - 20 * 0.009;
-      assertView(h, yaw, pitch);
+      assertView(h, [30, 20]);
       h.send(TouchType.Up, inclusive ? moved.map(p => ({ ...p })) : moved.slice(0, 2), [{ ...moved[2] }]);
       near(h.state.lastX, (moved[0].x + moved[1].x) / 2);
       near(h.state.lastY, (moved[0].y + moved[1].y) / 2);
       assert.equal(h.state.pointerCount, 2);
       h.send(TouchType.Move, moved.slice(0, 2));
-      assertView(h, yaw, pitch);
+      assertView(h, [30, 20]);
       h.send(TouchType.Up, inclusive ? moved.slice(0, 2) : [moved[1]], [{ ...moved[0] }]);
       assert.equal(h.state.pointerCount, 1);
       assert.equal(h.state.orbiting, true);
       h.send(TouchType.Move, [moved[1]]);
-      assertView(h, yaw, pitch);
+      assertView(h, [30, 20]);
       const end = point(11, moved[1].x + 10, moved[1].y + 5);
       h.send(TouchType.Up, [], [end]);
-      assertView(h, yaw - 10 * 0.009, pitch - 5 * 0.009);
+      assertView(h, [30, 20], [10, 5]);
       assertNoMove(h);
       assertReleased(h);
     });
@@ -291,7 +323,7 @@ test('simultaneous two-finger Down and Up use centroids', () => {
   const h = harness({ busy: true });
   h.send(TouchType.Down, [point(1, 20, 30), point(2, 80, 90)]);
   h.send(TouchType.Up, [], [point(1, 40, 60), point(2, 100, 120)]);
-  assertView(h, 0.62 - 20 * 0.009, -0.42 - 30 * 0.009);
+  assertView(h, [20, 30]);
   assertNoMove(h);
 });
 test('pointer count change first reported by Move rebases without a jump', () => {
@@ -303,7 +335,7 @@ test('pointer count change first reported by Move rebases without a jump', () =>
   h.send(TouchType.Move, [point(2, 500, 600)]);
   assertView(h);
   h.send(TouchType.Up, [], [point(2, 520, 610)]);
-  assertView(h, 0.62 - 20 * 0.009, -0.42 - 10 * 0.009);
+  assertView(h, [20, 10]);
   assertNoMove(h);
 });
 for (const hit of [true, false]) {
@@ -322,7 +354,7 @@ for (const hit of [true, false]) {
       assertNoMove(h);
       start(h);
       up(h);
-      assert.ok(hit ? h.calls.requestMove.length === 1 : h.state.yaw !== 0.62);
+      assert.ok(hit ? h.calls.requestMove.length === 1 : viewDistance(h.state.view, homeView()) > 0);
     });
   }
 }
@@ -410,7 +442,7 @@ for (const hit of [true, false]) {
 for (const [name, mutate] of [
   ['session', s => s.sessionId++], ['model identity', s => { s.model = new CubeModel(3); }],
   ['canvas width', s => s.canvasWidth++], ['canvas height', s => s.canvasHeight++],
-  ['yaw', s => s.yaw += 0.1], ['pitch', s => s.pitch += 0.1],
+  ['view', s => { s.view = s.view.orbit(10, 0); }],
   ['page', s => { s.page = 'home'; }], ['version', s => s.gestureVersion++]
 ]) {
   test(`Down snapshot rejects stale ${name} at Up`, () => {
@@ -450,7 +482,7 @@ for (const hit of [true, false]) {
     start(h);
     up(h);
     if (hit) assert.equal(h.calls.requestMove.length, 1, 'fresh Down recovers layer input');
-    else assert.notEqual(h.state.yaw, 0.62, 'fresh Down recovers view inspection');
+    else assert.ok(viewDistance(h.state.view, homeView()) > 0, 'fresh Down recovers view inspection');
   });
 }
 
@@ -478,7 +510,7 @@ test('real animate keeps an ongoing orbit active', () => {
   h.state.animate([h.pickedMove], 'user');
   assert.equal(h.state.touching, true);
   up(h);
-  assertView(h, 0.62 - 60 * 0.009, -0.42 - 20 * 0.009);
+  assertView(h, [60, 20]);
   assertNoMove(h);
 });
 test('real undo invalidates a pending layer after a model mutation', () => {
@@ -501,7 +533,7 @@ test('disappearance clears touch ownership', () => {
 });
 test('area, front view, and non-game navigation callbacks explicitly invalidate', () => {
   assert.match(source, /\.onAreaChange\(\(_old: Area, area: Area\) => \{\s*this\.invalidateGesture\(\);\s*this\.canvasWidth/);
-  assert.match(source, /\.onClick\(\(\) => \{ this\.invalidateGesture\(\); this\.yaw = 0\.62; this\.pitch = -0\.42;/);
+  assert.match(source, /\.onClick\(\(\) => \{ this\.invalidateGesture\(\); this\.view = CubeView\.fromAngles\(0\.62, -0\.42\);/);
   assert.ok(member('homeTile').includes('this.invalidateGesture(); this.canvasReady = false; this.page = page;'));
   for (const page of ['stats', 'settings']) {
     assert.match(member('homePage'), new RegExp(`this\\.homeTile\\('\\w+', '${page}'\\)`));
@@ -627,7 +659,7 @@ for (const inclusive of [true, false]) {
     h.send(TouchType.Up, inclusive ? [end] : [], [end]);
     assertNoMove(h);
     assertReleased(h);
-    assertView(h, 0.62 - 60 * 0.009, -0.42 - 40 * 0.009);
+    assertView(h, [30, 20], [30, 20]);
     assert.equal(JSON.stringify(h.state.model.cubies), before);
     assert.equal(h.state.model.moveCount, count);
     assert.equal(h.state.phase, 'solved');

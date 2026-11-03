@@ -2,7 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CubeModel, CubeMove } from '../model/CubeModel';
 import { TeachingChallenge, createTeachingChallenges } from '../model/CubeTeaching';
-import { CubeRenderer } from '../render/CubeRenderer';
+import { CubeRenderer, CubeView } from '../render/CubeRenderer';
 import { CubeStore, CubeSettings, SolveRecord, TeachingRecord } from '../storage/CubeStore';
 import { CubeFeedback } from '../platform/CubeFeedback';
 import { CubeFont, CubeLayout, CubeRadius, CubeSpace, CubeTheme } from './CubeTheme';
@@ -72,8 +72,7 @@ struct Index {
   private canvasHeight: number = 320;
   private canvasReady: boolean = false;
   private cubeZoom: number = 1;
-  private yaw: number = 0.62;
-  private pitch: number = -0.42;
+  private view: CubeView = CubeView.fromAngles(0.62, -0.42);
   private frameTimer: number = -1;
   private clockTimer: number = -1;
   private sessionId: number = 0;
@@ -96,15 +95,13 @@ struct Index {
   private pointerCount: number = 0;
   private blockedTouch: boolean = false;
   private orbitDragging: boolean = false;
-  private orbitYawSign: number = 1;
   private gestureVersion: number = 0;
   private downVersion: number = 0;
   private downSession: number = 0;
   private downModel: CubeModel | null = null;
   private downWidth: number = 0;
   private downHeight: number = 0;
-  private downYaw: number = 0;
-  private downPitch: number = 0;
+  private downView: CubeView | null = null;
   private downPage: string = '';
   private practiceOrder: number = 3;
   private readonly challenges: TeachingChallenge[] = createTeachingChallenges();
@@ -274,7 +271,7 @@ struct Index {
   private draw(progress: number = 0): void {
     if (!this.canvasReady) { this.resetGuide(); return; }
     this.renderer.draw(this.context2d, this.canvasWidth, this.canvasHeight,
-      this.model, this.yaw, this.pitch, this.activeMove, progress, this.cubeZoom);
+      this.model, this.view, this.activeMove, progress, this.cubeZoom);
     this.drawGuidance();
   }
 
@@ -419,8 +416,7 @@ struct Index {
     this.resetSession();
     this.challengeIndex = index;
     challenge.load(this.model);
-    this.yaw = 0.62;
-    this.pitch = -0.42;
+    this.view = CubeView.fromAngles(0.62, -0.42);
     this.cubeZoom = 1.12;
     this.phase = 'ready';
     this.setHint('teaching_start_hint');
@@ -485,8 +481,7 @@ struct Index {
 
   private startGame(): void {
     this.resetSession();
-    this.yaw = 0.62;
-    this.pitch = -0.42;
+    this.view = CubeView.fromAngles(0.62, -0.42);
     // 1.12 is the largest zoom that never clips the cube at extreme orbit angles.
     this.cubeZoom = 1.12;
     this.canvasReady = false;
@@ -811,7 +806,7 @@ struct Index {
     return this.downVersion === this.gestureVersion && this.downSession === this.sessionId &&
       this.downModel === this.model && this.downPage === this.page &&
       this.downWidth === this.canvasWidth && this.downHeight === this.canvasHeight &&
-      this.downYaw === this.yaw && this.downPitch === this.pitch;
+      this.downView === this.view;
   }
 
   private setTouchOrigin(points: TouchObject[]): void {
@@ -825,7 +820,6 @@ struct Index {
     this.startY = this.lastY = y / points.length;
     this.pointerCount = points.length;
     this.orbitDragging = false;
-    this.orbitYawSign = Math.cos(this.pitch) < 0 ? -1 : 1;
   }
 
   private moveOrbit(x: number, y: number): void {
@@ -833,12 +827,8 @@ struct Index {
     const dy = y - this.startY;
     if (!this.orbitDragging && Math.sqrt(dx * dx + dy * dy) <= 8) { return; }
     this.orbitDragging = true;
-    // worldToCamera applies Y(-yaw), then X(-pitch): subtract screen deltas.
     const moved = x !== this.lastX || y !== this.lastY;
-    const yaw = this.yaw - this.orbitYawSign * (x - this.lastX) * 0.009;
-    const pitch = this.pitch - (y - this.lastY) * 0.009;
-    this.yaw = yaw - Math.round(yaw / (Math.PI * 2)) * Math.PI * 2;
-    this.pitch = pitch - Math.round(pitch / (Math.PI * 2)) * Math.PI * 2;
+    this.view = this.view.orbit(x - this.lastX, y - this.lastY);
     this.lastX = x;
     this.lastY = y;
     if (moved && !this.busy) { this.draw(); }
@@ -882,7 +872,7 @@ struct Index {
           const dy = y - this.startY;
           if (Math.sqrt(dx * dx + dy * dy) >= 24) {
             const move = this.renderer.pickMove(this.startX, this.startY, x, y,
-              this.model, this.yaw, this.pitch);
+              this.model, this.view);
             // Release before dispatch, even if requestMove synchronously starts animation.
             this.invalidateGesture();
             if (move !== null) { this.requestMove(move); }
@@ -906,8 +896,7 @@ struct Index {
         this.downPage = this.page;
         this.downWidth = this.canvasWidth;
         this.downHeight = this.canvasHeight;
-        this.downYaw = this.yaw;
-        this.downPitch = this.pitch;
+        this.downView = this.view;
       } else if (event.touches.length > 1) {
         this.orbiting = true;
         this.blockedTouch = false;
@@ -1377,7 +1366,7 @@ struct Index {
           }.height(44).padding({ left: CubeSpace.s, right: CubeSpace.s }).backgroundColor(CubeTheme.surface)
             .border({ width: 1, color: CubeTheme.line, radius: 22 })
             .id('game-front-view').accessibilityText(this.tr('reset_view'))
-            .onClick(() => { this.invalidateGesture(); this.yaw = 0.62; this.pitch = -0.42; this.draw(); })
+            .onClick(() => { this.invalidateGesture(); this.view = CubeView.fromAngles(0.62, -0.42); this.draw(); })
         }.width('100%').hitTestBehavior(HitTestMode.Transparent).id('game-view-tools')
       }.width('100%').height('100%').padding(CubeSpace.s).hitTestBehavior(HitTestMode.Transparent)
     }.width('100%').height('100%')

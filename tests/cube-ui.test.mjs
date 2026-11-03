@@ -122,7 +122,7 @@ test('view controls float over the stage: gesture-guides toggle and front view k
   const front = stage.slice(stage.indexOf("Text(this.tr('reset_view'))"));
   assert.match(front, /\.height\(44\)/);
   assert.match(front, /\.id\('game-front-view'\)\.accessibilityText\(this\.tr\('reset_view'\)\)/);
-  assert.match(front, /\.onClick\(\(\) => \{ this\.invalidateGesture\(\); this\.yaw = 0\.62; this\.pitch = -0\.42; this\.draw\(\); \}\)/);
+  assert.match(front, /\.onClick\(\(\) => \{ this\.invalidateGesture\(\); this\.view = CubeView\.fromAngles\(0\.62, -0\.42\); this\.draw\(\); \}\)/);
   assert.equal(base.guides_label, '手势提示');
   assert.equal(english.guides_label, 'Gesture guides');
   assert.equal(base.reset_view, '正视角');

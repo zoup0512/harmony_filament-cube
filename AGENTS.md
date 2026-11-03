@@ -19,6 +19,9 @@
 - `components/*` are presentational: data via `@Prop` view models, actions via callbacks, labels via `$r`.
   `IntroPage` is the exception: it owns a throwaway `CubeModel`/`CubeRenderer` for the first-run
   gesture demo (never touches the game cube) and reports back only via `onDone`.
+- The camera is a `CubeView` (world-to-camera rotation matrix, in `render/CubeRenderer.ets`); drags call
+  `view.orbit(dx, dy)` (trackball about screen axes, no pole clamp). `CubeView.fromAngles(yaw, pitch)` builds
+  fixed views; Index/touch tests get the real class from `tests/view-helper.mjs`.
 - Colors only through `CubeTheme` (resources in `base/` and `dark/` color.json must share keys); fonts >= 12fp.
 - Do not use `Circle/Rect` shapes with resource colors (API 26 only; app is compatible with API 24).
 - en and en_US string tables must stay identical; visible copy must avoid "game/play" wording (localization test).

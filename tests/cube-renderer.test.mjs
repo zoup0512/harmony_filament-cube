@@ -13,6 +13,7 @@ let CubeModel;
 let CubeMove;
 let CubeRenderer;
 let CubeSwipeGuide;
+let CubeView;
 try {
   const modelSource = await readFile(new URL('../entry/src/main/ets/model/CubeModel.ts', import.meta.url), 'utf8');
   const rendererSource = await readFile(new URL('../entry/src/main/ets/render/CubeRenderer.ets', import.meta.url), 'utf8');
@@ -22,11 +23,12 @@ try {
   await writeFile(join(temporary, 'CubeModel.mjs'), stripTypeScriptTypes(modelSource, { mode: 'strip' }));
   await writeFile(join(temporary, 'CubeRenderer.mjs'), stripTypeScriptTypes(rewrittenRenderer, { mode: 'strip' }));
   ({ CubeModel, CubeMove } = await import(pathToFileURL(join(temporary, 'CubeModel.mjs')).href));
-  ({ CubeRenderer, CubeSwipeGuide } = await import(pathToFileURL(join(temporary, 'CubeRenderer.mjs')).href));
+  ({ CubeRenderer, CubeSwipeGuide, CubeView } = await import(pathToFileURL(join(temporary, 'CubeRenderer.mjs')).href));
 } catch (error) {
   await rm(temporary, { recursive: true, force: true });
   throw error;
 }
+const at = (yaw, pitch) => CubeView.fromAngles(yaw, pitch);
 after(async () => {
   await rm(temporary, { recursive: true, force: true });
 });
@@ -183,14 +185,14 @@ for (const order of orders) {
           const yaw = yawAngles[(layer + axes.indexOf(axis)) % yawAngles.length];
           const pitch = pitchAngles[(layer + (turns > 0 ? 1 : 0)) % pitchAngles.length];
           const before = snapshot(model);
-          renderer.draw(context, width, height, model, yaw, pitch);
+          renderer.draw(context, width, height, model, at(yaw, pitch));
           const initial = geometry(renderer);
           let endpoint;
           for (const progress of [-1, 0, NaN, 0.25, 0.5, 0.75, 1, 2]) {
-            renderer.draw(context, width, height, model, yaw, pitch, move, progress);
+            renderer.draw(context, width, height, model, at(yaw, pitch), move, progress);
             assert.equal(snapshot(model), before, `draw mutated ${axis}/${layer}/${turns} at ${progress}`);
             assert.equal(context.stack.length, 0);
-            assert.equal(renderer.pickMove(210, 250, 250, 250, model, yaw, pitch), null,
+            assert.equal(renderer.pickMove(210, 250, 250, 250, model, at(yaw, pitch)), null,
               'in-flight animation must not produce a new move');
             if (progress <= 0 || Number.isNaN(progress)) assert.deepEqual(geometry(renderer), initial);
             if (progress === 1) endpoint = geometry(renderer);
@@ -202,7 +204,7 @@ for (const order of orders) {
             frames++;
           }
           model.applyMove(move, false);
-          renderer.draw(context, width, height, model, yaw, pitch);
+          renderer.draw(context, width, height, model, at(yaw, pitch));
           assert.deepEqual(geometry(renderer), endpoint, `committed endpoint ${axis}/${layer}/${turns}`);
         }
       }
@@ -220,7 +222,7 @@ for (const order of orders) {
     let picks = 0;
     for (const yaw of yawAngles) {
       for (const pitch of pitchAngles) {
-        renderer.draw(context, width, height, model, yaw, pitch);
+        renderer.draw(context, width, height, model, at(yaw, pitch));
         assert.equal(renderer.hitTest(1, 1), false, 'background must not count as a face');
         for (const face of renderer.faces) {
           if (!face.color) continue;
@@ -237,7 +239,7 @@ for (const order of orders) {
             const secondScore = other.length < 0.0001 ? 0 : Math.abs(swipe.dx * other.dx + swipe.dy * other.dy) / 900;
             for (const sign of [-1, 1]) {
               const move = renderer.pickMove(swipe.x, swipe.y,
-                swipe.x + sign * swipe.dx, swipe.y + sign * swipe.dy, model, yaw, pitch);
+                swipe.x + sign * swipe.dx, swipe.y + sign * swipe.dy, model, at(yaw, pitch));
               const label = `${order} yaw=${yaw} pitch=${pitch} cubie=${face.cubie.id} ${axis}/${sign}`;
               if (1 - secondScore < 0.15) {
                 assert.equal(move, null, `ambiguous projected axes must reject: ${label}`);
@@ -267,33 +269,33 @@ test('public hit/pick guards, known front-face signs, and Canvas state restorati
   const renderer = new CubeRenderer();
   const context = new CheckingCanvas();
   assert.equal(renderer.hitTest(210, 250), false);
-  assert.equal(renderer.pickMove(210, 250, 250, 250, model, 0, 0), null);
+  assert.equal(renderer.pickMove(210, 250, 250, 250, model, at(0, 0)), null);
   context.globalAlpha = 0.37;
   context.fillStyle = '#abcdef';
-  renderer.draw(context, width, height, model, 0, 0);
+  renderer.draw(context, width, height, model, at(0, 0));
   assert.equal(context.globalAlpha, 0.37);
   assert.equal(context.fillStyle, '#abcdef');
   assert.equal(renderer.hitTest(210, 250), true);
   // Known independent signs: front right swipe => +Y; front up swipe => -X.
   for (const [endX, endY, axis, turns] of [[250, 250, 'y', 1], [170, 250, 'y', -1],
     [210, 210, 'x', -1], [210, 290, 'x', 1]]) {
-    const move = renderer.pickMove(210, 250, endX, endY, model, 0, 0);
+    const move = renderer.pickMove(210, 250, endX, endY, model, at(0, 0));
     assert.ok(move instanceof CubeMove);
     assert.deepEqual([move.axis, move.layer, move.turns], [axis, 1, turns]);
   }
   for (const [x, y] of [[-1, 250], [421, 250], [1, 1], [NaN, 250], [210, Infinity]]) {
     assert.equal(renderer.hitTest(x, y), false);
-    assert.equal(renderer.pickMove(x, y, 250, 250, model, 0, 0), null);
+    assert.equal(renderer.pickMove(x, y, 250, 250, model, at(0, 0)), null);
   }
-  assert.equal(renderer.pickMove(210, 250, 211, 250, model, 0, 0), null, 'short drag');
-  assert.equal(renderer.pickMove(210, 250, NaN, 250, model, 0, 0), null, 'invalid endpoint');
-  assert.equal(renderer.pickMove(210, 250, 250, 250, model, 0.1, 0), null, 'stale camera');
-  assert.equal(renderer.pickMove(210, 250, 250, 250, new CubeModel(3), 0, 0), null, 'other model');
+  assert.equal(renderer.pickMove(210, 250, 211, 250, model, at(0, 0)), null, 'short drag');
+  assert.equal(renderer.pickMove(210, 250, NaN, 250, model, at(0, 0)), null, 'invalid endpoint');
+  assert.equal(renderer.pickMove(210, 250, 250, 250, model, at(0.1, 0)), null, 'stale camera');
+  assert.equal(renderer.pickMove(210, 250, 250, 250, new CubeModel(3), at(0, 0)), null, 'other model');
   model.applyMove(new CubeMove('x', 1, 1), false);
-  assert.equal(renderer.pickMove(210, 250, 250, 250, model, 0, 0), null, 'moved hit cubie needs redraw');
-  renderer.draw(context, 0, height, model, 0, 0);
+  assert.equal(renderer.pickMove(210, 250, 250, 250, model, at(0, 0)), null, 'moved hit cubie needs redraw');
+  renderer.draw(context, 0, height, model, at(0, 0));
   assert.equal(renderer.hitTest(210, 250), false, 'invalid size clears old hit geometry');
-  renderer.draw(context, width, height, model, NaN, 0);
+  renderer.draw(context, width, height, model, at(NaN, 0));
   assert.equal(renderer.hitTest(210, 250), false, 'invalid camera clears old hit geometry');
   assert.equal(context.stack.length, 0);
 });
@@ -333,7 +335,7 @@ for (const order of [2, 3, 4, 5]) {
     let count = 0;
     let unavailable = 0;
     for (const yaw of yawAngles) for (const pitch of pitchAngles) {
-      renderer.draw(context, width, height, model, yaw, pitch);
+      renderer.draw(context, width, height, model, at(yaw, pitch));
       for (const axis of axes) for (let layer = 0; layer < order; layer++) for (const turns of [-1, 1]) {
         const target = new CubeMove(axis, layer, turns);
         const guide = renderer.getSwipeGuide(target);
@@ -363,7 +365,7 @@ for (const order of [2, 3, 4, 5]) {
           assert.deepEqual(end.normal, hit.normal, 'trail cannot cross onto another face');
           assert.equal(end.layer[axes.indexOf(axis)], layer, 'trail stays within the target layer');
         }
-        const picked = renderer.pickMove(startX, startY, endX, endY, model, yaw, pitch);
+        const picked = renderer.pickMove(startX, startY, endX, endY, model, at(yaw, pitch));
         assert.ok(picked, `guide must pick ${moveKey(target)} at ${yaw}/${pitch}`);
         assert.equal(moveKey(picked), moveKey(target));
         assert.deepEqual(renderer.getSwipeGuide(target), guide, 'guide selection is deterministic');
@@ -384,7 +386,7 @@ for (const order of [2, 3, 4, 5]) {
     const renderer = new CubeRenderer();
     const model = new CubeModel(order);
     const context = new CheckingCanvas();
-    renderer.draw(context, width, height, model, 0, 0);
+    renderer.draw(context, width, height, model, at(0, 0));
     for (let seam = 1; seam < order; seam++) {
       for (const offset of [-0.004, 0, 0.004]) {
         const worldX = -1 + 2 * seam / order + offset;
@@ -393,7 +395,7 @@ for (const order of [2, 3, 4, 5]) {
         // At the front seam the point is not inside any outer front plastic quad.
         assert.equal(renderer.faces.some(face => face.normal.z === 1 && face.z === order - 1 &&
           contains(face.outline, p.x, p.y)), false);
-        const move = renderer.pickMove(p.x, p.y, p.x, p.y + 55, model, 0, 0);
+        const move = renderer.pickMove(p.x, p.y, p.x, p.y + 55, model, at(0, 0));
         assert.ok(move);
         assert.equal(move.axis, 'x');
         assert.equal(move.turns, 1);
@@ -403,7 +405,7 @@ for (const order of [2, 3, 4, 5]) {
     }
     for (const x of [-1, 1]) {
       const p = screen([x, 0, 1], 0, 0);
-      const move = renderer.pickMove(p.x, p.y, p.x, p.y + 55, model, 0, 0);
+      const move = renderer.pickMove(p.x, p.y, p.x, p.y + 55, model, at(0, 0));
       assert.ok(move);
       assert.equal(move.layer, x < 0 ? 0 : order - 1);
       const outside = screen([x * 1.001, 0, 1], 0, 0);
@@ -412,7 +414,7 @@ for (const order of [2, 3, 4, 5]) {
     // Seams on all six sides and oblique cameras use the nearest envelope face.
     let hits = 0;
     for (const yaw of yawAngles) for (const pitch of pitchAngles) {
-      renderer.draw(context, width, height, model, yaw, pitch);
+      renderer.draw(context, width, height, model, at(yaw, pitch));
       for (let normalAxis = 0; normalAxis < 3; normalAxis++) for (const side of [-1, 1]) {
         for (let seam = 1; seam < order; seam++) {
           const world = [0.13, 0.13, 0.13];
@@ -445,7 +447,7 @@ test('oblique guides adapt travel and remain on the same surface/layer after pix
     for (const [w, h] of [[210, 250], [320, 284]]) {
       for (const zoom of [1, 1.25]) {
         for (const [yaw, pitch] of [[0, -1.3], [3.14, -0.42], [-0.8, 0.73], [1.57, 1.45]]) {
-          renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch, null, 0, zoom);
+          renderer.draw(new CheckingCanvas(), w, h, model, at(yaw, pitch), null, 0, zoom);
           for (const axis of axes) for (let layer = 0; layer < order; layer++) for (const turns of [-1, 1]) {
             const move = new CubeMove(axis, layer, turns);
             const guide = renderer.getSwipeGuide(move);
@@ -466,7 +468,7 @@ test('oblique guides adapt travel and remain on the same surface/layer after pix
                 assert.deepEqual(hit.normal, start.normal);
                 assert.equal(hit.layer[axes.indexOf(axis)], layer);
               }
-              assert.equal(moveKey(renderer.pickMove(sx, sy, ex, ey, model, yaw, pitch)), moveKey(move));
+              assert.equal(moveKey(renderer.pickMove(sx, sy, ex, ey, model, at(yaw, pitch))), moveKey(move));
               checked++;
             }
           }
@@ -476,7 +478,7 @@ test('oblique guides adapt travel and remain on the same surface/layer after pix
   }
   assert.ok(checked > 1000 && shortened > 0 && unavailable > 0);
   const renderer = new CubeRenderer();
-  renderer.draw(new CheckingCanvas(), 48, 48, new CubeModel(3), 3.14, -0.42);
+  renderer.draw(new CheckingCanvas(), 48, 48, new CubeModel(3), at(3.14, -0.42));
   assert.equal(renderer.getSwipeGuide(new CubeMove('x', 2, 1)), null, 'hide paths too small for a reliable swipe');
   t.diagnostic(`${checked} pixel-rounded guides, ${shortened} shortened paths, ${unavailable} safe view fallbacks`);
 });
@@ -489,7 +491,7 @@ test('perspective score and ambiguity gates reject diagonals, including two high
   let ambiguous = 0;
   let accepted = 0;
   for (const [yaw, pitch] of [[0, 0], [0.62, -0.42], [-0.8, 0.73], [0.8, 1.3]]) {
-    renderer.draw(context, width, height, model, yaw, pitch);
+    renderer.draw(context, width, height, model, at(yaw, pitch));
     const hit = envelopeHit(210, 250, 3, yaw, pitch);
     const face = { x: hit.layer[0], y: hit.layer[1], z: hit.layer[2],
       normal: { x: hit.normal[0], y: hit.normal[1], z: hit.normal[2] } };
@@ -502,7 +504,7 @@ test('perspective score and ambiguity gates reject diagonals, including two high
         return { axis, score: Math.abs(dot), turns: dot >= 0 ? 1 : -1 };
       }).sort((a, b) => b.score - a.score);
       const [best, second] = scores;
-      const move = renderer.pickMove(210, 250, 210 + dx, 250 + dy, model, yaw, pitch);
+      const move = renderer.pickMove(210, 250, 210 + dx, 250 + dy, model, at(yaw, pitch));
       if (best.score < 0.75 || best.score - second.score < 0.15) {
         assert.equal(move, null, `reject angle ${angle} at ${yaw}/${pitch}`);
         if (best.score < 0.75) lowScore++;
@@ -526,7 +528,7 @@ test('beginner gestures stay on visible face corners and match row/column swipes
       for (const yaw of yawAngles) {
         for (const pitch of pitchAngles) {
           const renderer = new CubeRenderer();
-          renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch);
+          renderer.draw(new CheckingCanvas(), w, h, model, at(yaw, pitch));
           const guides = renderer.getBeginnerGuides();
           const markedFaces = new Map();
           const starts = new Set();
@@ -555,8 +557,8 @@ test('beginner gestures stay on visible face corners and match row/column swipes
                 Math.hypot(b.x - a.x, b.y - a.y);
               assert.ok(clearance >= radius + 1.5 - 1e-7, 'hand and soft swipe trail must fit inside sticker');
             }
-            const forward = renderer.pickMove(x, y, x + dx / radius * 55, y + dy / radius * 55, model, yaw, pitch);
-            const backward = renderer.pickMove(x, y, x - dx / radius * 55, y - dy / radius * 55, model, yaw, pitch);
+            const forward = renderer.pickMove(x, y, x + dx / radius * 55, y + dy / radius * 55, model, at(yaw, pitch));
+            const backward = renderer.pickMove(x, y, x - dx / radius * 55, y - dy / radius * 55, model, at(yaw, pitch));
             assert.ok(forward && backward, 'both displayed directions must accept a full swipe');
             assert.equal(forward.axis, backward.axis);
             assert.equal(forward.layer, hit[forward.axis]);
@@ -581,7 +583,7 @@ test('front-facing gestures cover exactly four corners on every order and keep b
   for (const order of [2, 3, 4, 5]) {
     const model = seededModel(order);
     const renderer = new CubeRenderer();
-    renderer.draw(new CheckingCanvas(), width, height, model, 0, 0);
+    renderer.draw(new CheckingCanvas(), width, height, model, at(0, 0));
     const guides = renderer.getBeginnerGuides();
     assert.equal(guides.length, 4, `${order}x${order} front face has four gesture markers`);
     const coordinates = guides.map(guide => {
@@ -595,7 +597,7 @@ test('front-facing gestures cover exactly four corners on every order and keep b
       const dy = guide.endY - guide.startY;
       const length = Math.hypot(dx, dy);
       return renderer.pickMove(guide.startX, guide.startY, guide.startX + dx / length * 55,
-        guide.startY + dy / length * 55, model, 0, 0).axis;
+        guide.startY + dy / length * 55, model, at(0, 0)).axis;
     }));
     assert.deepEqual([...directions].sort(), ['x', 'y']);
   }
@@ -665,7 +667,7 @@ test('beginner overlay restores Canvas and hides stale, animated or unreadably s
   const overlay = new GestureCanvas();
   const move = new CubeMove('x', 0, 1);
   assert.deepEqual(renderer.getBeginnerGuides(), []);
-  renderer.draw(context, width, height, model, 0.62, -0.42);
+  renderer.draw(context, width, height, model, at(0.62, -0.42));
   const guides = renderer.getBeginnerGuides();
   assert.ok(guides.length > 0);
   const before = geometry(renderer);
@@ -685,20 +687,20 @@ test('beginner overlay restores Canvas and hides stale, animated or unreadably s
   assert.deepEqual(overlay.transform, [1, 0, 0, 1, 0, 0], 'gesture transforms cannot leak into the cube');
   assert.deepEqual(geometry(renderer), before);
   for (const progress of [0, 0.5, 1]) {
-    renderer.draw(context, width, height, model, 0.62, -0.42, move, progress);
+    renderer.draw(context, width, height, model, at(0.62, -0.42), move, progress);
     assert.deepEqual(renderer.getBeginnerGuides(), []);
     renderer.drawBeginnerGuides(overlay);
     assert.equal(overlay.strokes.length, guides.length * 2);
   }
-  renderer.draw(context, width, height, model, 0.62, -0.42);
+  renderer.draw(context, width, height, model, at(0.62, -0.42));
   model.applyMove(move, false);
   assert.deepEqual(renderer.getBeginnerGuides(), []);
-  renderer.draw(context, width, height, model, 0.62, -0.42);
+  renderer.draw(context, width, height, model, at(0.62, -0.42));
   model.reset();
   assert.deepEqual(renderer.getBeginnerGuides(), []);
-  renderer.draw(context, 24, 24, model, 0.62, -0.42);
+  renderer.draw(context, 24, 24, model, at(0.62, -0.42));
   assert.deepEqual(renderer.getBeginnerGuides(), []);
-  renderer.draw(context, 0, height, model, 0.62, -0.42);
+  renderer.draw(context, 0, height, model, at(0.62, -0.42));
   assert.deepEqual(renderer.getBeginnerGuides(), []);
 });
 
@@ -706,7 +708,7 @@ test('target hand presses, follows the exact swipe, then releases and fades with
   const renderer = new CubeRenderer();
   const model = new CubeModel(3);
   const before = snapshot(model);
-  renderer.draw(new CheckingCanvas(), width, height, model, 0.62, -0.42);
+  renderer.draw(new CheckingCanvas(), width, height, model, at(0.62, -0.42));
   const move = new CubeMove('y', 1, 1);
   const guide = renderer.getSwipeGuide(move);
   assert.ok(guide);
@@ -752,13 +754,13 @@ test('target hand presses, follows the exact swipe, then releases and fades with
     assert.deepEqual(ctx.handFrames[0], frames[0], 'invalid or negative progress uses the safe start pose');
   }
   assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
-    model, 0.62, -0.42)), moveKey(move));
+    model, at(0.62, -0.42))), moveKey(move));
   assert.equal(snapshot(model), before);
 });
 
 test('tutorial guide draws only the hand without a trail, endpoint markers or touch halo', () => {
   const renderer = new CubeRenderer();
-  renderer.draw(new CheckingCanvas(), width, height, new CubeModel(3), 0.62, -0.42);
+  renderer.draw(new CheckingCanvas(), width, height, new CubeModel(3), at(0.62, -0.42));
   const guide = renderer.getSwipeGuide(new CubeMove('y', 1, 1));
   assert.ok(guide);
   for (const progress of [0, 0.1, 0.45, 0.74, 0.88, 0.95, 0.96, 1]) {
@@ -784,7 +786,7 @@ test('moving hands stay inside small canvases for each order, face and turn dire
     const renderer = new CubeRenderer();
     for (const [w, h] of [[210, 250], [280, 240]]) {
       for (const [yaw, pitch] of [[0.62, -0.42], [-0.8, 0.73], [2.6, -1.3]]) {
-        renderer.draw(new CheckingCanvas(), w, h, model, yaw, pitch);
+        renderer.draw(new CheckingCanvas(), w, h, model, at(yaw, pitch));
         for (const axis of axes) for (const layer of [0, order - 1]) for (const turn of [-1, 1]) {
           const guide = renderer.getSwipeGuide(new CubeMove(axis, layer, turn));
           if (guide === null) continue;
@@ -825,13 +827,13 @@ test('swipe guide cache reuses equal-value targets and snapshots mutable move fi
   const before = snapshot(model);
   const calls = countGuideSearch(renderer);
   const move = new CubeMove('y', 1, 1);
-  renderer.draw(new CheckingCanvas(), width, height, model, 0.62, -0.42);
+  renderer.draw(new CheckingCanvas(), width, height, model, at(0.62, -0.42));
   let guide = renderer.getSwipeGuide(move);
   assert.ok(guide instanceof CubeSwipeGuide);
   assert.ok(calls.boxHit > 0 && calls.pickMove > 0, 'first request performs a real geometric search');
   for (const [field, value] of [['axis', 'x'], ['layer', 0], ['turns', -1]]) {
     assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
-      model, 0.62, -0.42)), moveKey(move));
+      model, at(0.62, -0.42))), moveKey(move));
     const searched = { ...calls };
     for (let i = 0; i < 3; i++) {
       assert.deepEqual(renderer.getSwipeGuide(new CubeMove(move.axis, move.layer, move.turns)), guide);
@@ -847,7 +849,7 @@ test('swipe guide cache reuses equal-value targets and snapshots mutable move fi
       `changing only ${field} must search again`);
   }
   assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
-    model, 0.62, -0.42)), moveKey(move));
+    model, at(0.62, -0.42))), moveKey(move));
   assert.equal(snapshot(model), before, 'cached requests must not mutate puzzle state or history');
 });
 
@@ -862,7 +864,7 @@ test('swipe guide cache recomputes after view, zoom and size redraws', () => {
     [420, 500, 0.62, -0.42, 1.25], [480, 500, 0.62, -0.42, 1.25],
     [480, 560, 0.62, -0.42, 1.25], [480, 560, 0.62, -0.42, 1.25]
   ]) {
-    renderer.draw(context, w, h, model, yaw, pitch, null, 0, zoom);
+    renderer.draw(context, w, h, model, at(yaw, pitch), null, 0, zoom);
     const before = { ...calls };
     const guide = renderer.getSwipeGuide(move);
     assert.ok(guide instanceof CubeSwipeGuide);
@@ -872,7 +874,7 @@ test('swipe guide cache recomputes after view, zoom and size redraws', () => {
     assert.deepEqual(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), guide);
     assert.deepEqual(calls, searched, 'the new stable frame can reuse its result');
     assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
-      model, yaw, pitch)), moveKey(move), 'recomputed guidance must execute in the new geometry');
+      model, at(yaw, pitch))), moveKey(move), 'recomputed guidance must execute in the new geometry');
   }
 });
 
@@ -887,7 +889,7 @@ test('swipe guide cache rejects moved/reset geometry until a fresh draw', () => 
     const context = new CheckingCanvas();
     const calls = countGuideSearch(renderer);
     const move = new CubeMove('y', 1, 1);
-    renderer.draw(context, width, height, model, 0, 0);
+    renderer.draw(context, width, height, model, at(0, 0));
     assert.ok(renderer.getSwipeGuide(move));
     const searched = { ...calls };
     mutate(model);
@@ -895,7 +897,7 @@ test('swipe guide cache rejects moved/reset geometry until a fresh draw', () => 
       assert.equal(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), null, `${label} makes cached geometry stale`);
     }
     assert.deepEqual(calls, searched, 'stale geometry must be rejected before cached reuse or a new search');
-    renderer.draw(context, width, height, model, 0, 0);
+    renderer.draw(context, width, height, model, at(0, 0));
     const guide = renderer.getSwipeGuide(move);
     assert.ok(guide instanceof CubeSwipeGuide);
     assert.ok(calls.boxHit > searched.boxHit && calls.pickMove > searched.pickMove, `${label} needs a new search`);
@@ -903,7 +905,7 @@ test('swipe guide cache rejects moved/reset geometry until a fresh draw', () => 
     assert.deepEqual(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), guide);
     assert.deepEqual(calls, refreshed);
     assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
-      model, 0, 0)), moveKey(move));
+      model, at(0, 0))), moveKey(move));
   }
 });
 
@@ -915,7 +917,7 @@ test('swipe guide cache does not bypass invalid targets, draws or animation', ()
   const move = new CubeMove('y', 1, 1);
   assert.equal(renderer.getSwipeGuide(move), null, 'no geometry before the first draw');
   assert.deepEqual(calls, { boxHit: 0, pickMove: 0 });
-  renderer.draw(context, width, height, model, 0, 0);
+  renderer.draw(context, width, height, model, at(0, 0));
   const guide = renderer.getSwipeGuide(move);
   assert.ok(guide);
   const searched = { ...calls };
@@ -935,10 +937,10 @@ test('swipe guide cache does not bypass invalid targets, draws or animation', ()
     [width, height, NaN, 0, null, 0], [width, height, 0, Infinity, null, 0],
     [width, height, 0, 0, move, 0], [width, height, 0, 0, move, 0.5], [width, height, 0, 0, move, 1]
   ]) {
-    renderer.draw(context, width, height, model, 0, 0);
+    renderer.draw(context, width, height, model, at(0, 0));
     assert.ok(renderer.getSwipeGuide(move), 'warm a valid result before each rejected frame');
     const before = { ...calls };
-    renderer.draw(context, w, h, model, yaw, pitch, animation, progress);
+    renderer.draw(context, w, h, model, at(yaw, pitch), animation, progress);
     assert.equal(renderer.getSwipeGuide(new CubeMove('y', 1, 1)), null,
       'invalid draws and all animation phases must hide the warmed guide');
     assert.deepEqual(calls, before, 'rejected frames cannot launch a geometry search');
@@ -950,7 +952,7 @@ test('swipe guide cache reuses null results and searches again after a view chan
   const model = new CubeModel(3);
   const context = new CheckingCanvas();
   const calls = countGuideSearch(renderer);
-  renderer.draw(context, width, height, model, 0, 0);
+  renderer.draw(context, width, height, model, at(0, 0));
   assert.ok(renderer.getSwipeGuide(new CubeMove('y', 1, 1)));
   const before = { ...calls };
   const move = new CubeMove('z', 2, 1);
@@ -961,7 +963,7 @@ test('swipe guide cache reuses null results and searches again after a view chan
     assert.equal(renderer.getSwipeGuide(new CubeMove('z', 2, 1)), null);
   }
   assert.deepEqual(calls, searched, 'a cached null result must not repeat geometric work');
-  renderer.draw(context, width, height, model, 0.62, -0.42);
+  renderer.draw(context, width, height, model, at(0.62, -0.42));
   const guide = renderer.getSwipeGuide(new CubeMove('z', 2, 1));
   assert.ok(guide instanceof CubeSwipeGuide, 'another view makes the previously unavailable target reachable');
   assert.ok(calls.boxHit > searched.boxHit && calls.pickMove > searched.pickMove);
@@ -969,7 +971,7 @@ test('swipe guide cache reuses null results and searches again after a view chan
   assert.deepEqual(renderer.getSwipeGuide(new CubeMove('z', 2, 1)), guide);
   assert.deepEqual(calls, refreshed);
   assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY,
-    model, 0.62, -0.42)), moveKey(move));
+    model, at(0.62, -0.42))), moveKey(move));
 });
 
 test('guide cache lifetime, invalidation, logical units, overlay and Canvas restoration', () => {
@@ -980,7 +982,7 @@ test('guide cache lifetime, invalidation, logical units, overlay and Canvas rest
   const overlay = new GestureCanvas();
   assert.equal(renderer.getSwipeGuide(move), null, 'must draw first');
   for (const [w, h] of [[210, 250], [420, 500], [840, 1000]]) {
-    renderer.draw(context, w, h, model, 0, 0);
+    renderer.draw(context, w, h, model, at(0, 0));
     const guide = renderer.getSwipeGuide(move);
     assert.ok(guide);
     const travel = Math.hypot(guide.endX - guide.startX, guide.endY - guide.startY);
@@ -999,34 +1001,34 @@ test('guide cache lifetime, invalidation, logical units, overlay and Canvas rest
     assert.deepEqual(overlay.strokes.slice(-5), ['#FFFFFF', '#82B5A4', '#82B5A4', '#82B5A4', '#6E958A']);
     assert.equal(overlay.lineCap, 'butt');
     assert.deepEqual(overlay.transform, [1, 0, 0, 1, 0, 0]);
-    assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY, model, 0, 0)), moveKey(move));
+    assert.equal(moveKey(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY, model, at(0, 0))), moveKey(move));
   }
   assert.equal(renderer.getSwipeGuide(new CubeMove('z', 1, 1)), null, 'normal axis is unreachable head-on');
   assert.equal(renderer.getSwipeGuide(new CubeMove('y', 3, 1)), null, 'out of range target');
   for (const progress of [0, 0.5, 1]) {
-    renderer.draw(context, width, height, model, 0, 0, move, progress);
+    renderer.draw(context, width, height, model, at(0, 0), move, progress);
     assert.equal(renderer.getSwipeGuide(move), null, 'even animation endpoints wait for stable redraw');
     assert.equal(renderer.hitTest(210, 250), true, 'busy cube surface must stay hittable so UI can block it');
     assert.equal(renderer.hitTest(1, 1), false, 'busy background remains available for orbit');
-    assert.equal(renderer.pickMove(210, 250, 265, 250, model, 0, 0), null);
+    assert.equal(renderer.pickMove(210, 250, 265, 250, model, at(0, 0)), null);
   }
-  renderer.draw(context, width, height, model, 0, 0);
+  renderer.draw(context, width, height, model, at(0, 0));
   const guide = renderer.getSwipeGuide(move);
   // Mutate a different layer: a hit-local stale check alone would miss this.
   model.applyMove(new CubeMove('x', 0, 1), false);
   assert.equal(renderer.getSwipeGuide(move), null);
   assert.equal(renderer.hitTest(guide.startX, guide.startY), false);
-  assert.equal(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY, model, 0, 0), null);
+  assert.equal(renderer.pickMove(guide.startX, guide.startY, guide.endX, guide.endY, model, at(0, 0)), null);
   const strokes = overlay.strokes.length;
   renderer.drawGuide(overlay, guide);
   assert.equal(overlay.strokes.length, strokes, 'stale scene must not draw guide');
-  renderer.draw(context, width, height, model, 0, 0);
+  renderer.draw(context, width, height, model, at(0, 0));
   assert.ok(renderer.getSwipeGuide(move));
   model.reset();
   assert.equal(renderer.getSwipeGuide(move), null, 'same-order reset replaces cubies');
-  renderer.draw(context, width, height, model, 0, 0);
+  renderer.draw(context, width, height, model, at(0, 0));
   model.reset(4);
   assert.equal(renderer.getSwipeGuide(move), null, 'order changed');
-  renderer.draw(context, 0, height, model, 0, 0);
+  renderer.draw(context, 0, height, model, at(0, 0));
   assert.equal(renderer.getSwipeGuide(move), null, 'invalid draw clears guide cache');
 });

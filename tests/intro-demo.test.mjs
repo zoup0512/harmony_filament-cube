@@ -15,6 +15,7 @@ let CubeModel;
 let CubeMove;
 let CubeRenderer;
 let CubeSwipeGuide;
+let CubeView;
 try {
   const modelSource = await readFile(new URL('../entry/src/main/ets/model/CubeModel.ts', import.meta.url), 'utf8');
   const rendererSource = await readFile(new URL('../entry/src/main/ets/render/CubeRenderer.ets', import.meta.url), 'utf8');
@@ -24,11 +25,12 @@ try {
   await writeFile(join(temporary, 'CubeModel.mjs'), stripTypeScriptTypes(modelSource, { mode: 'strip' }));
   await writeFile(join(temporary, 'CubeRenderer.mjs'), stripTypeScriptTypes(rewrittenRenderer, { mode: 'strip' }));
   ({ CubeModel, CubeMove } = await import(pathToFileURL(join(temporary, 'CubeModel.mjs')).href));
-  ({ CubeRenderer, CubeSwipeGuide } = await import(pathToFileURL(join(temporary, 'CubeRenderer.mjs')).href));
+  ({ CubeRenderer, CubeSwipeGuide, CubeView } = await import(pathToFileURL(join(temporary, 'CubeRenderer.mjs')).href));
 } catch (error) {
   await rm(temporary, { recursive: true, force: true });
   throw error;
 }
+const at = (yaw, pitch) => CubeView.fromAngles(yaw, pitch);
 after(async () => {
   await rm(temporary, { recursive: true, force: true });
 });
@@ -160,7 +162,7 @@ test('IntroPage demo extraction: camera, demoBase, demoMove mirror and demoStage
   assert.equal(demoStageHeight(Number.NaN), 300);
   // Harness smoke check: the real renderer answers a guide for the first demo move.
   const renderer = new CubeRenderer();
-  renderer.draw(new NullCanvas(), 316, 300, new CubeModel(3), DEMO_YAW, DEMO_PITCH);
+  renderer.draw(new NullCanvas(), 316, 300, new CubeModel(3), at(DEMO_YAW, DEMO_PITCH));
   assert.ok(renderer.getSwipeGuide(demoMove(0)) instanceof CubeSwipeGuide);
   assert.ok(indexSource.length > 0);
   // PRNG is deterministic per seed.
@@ -191,7 +193,7 @@ test('Property 1: demo swipes start on the front face of the turning layer and r
       const renderer = new CubeRenderer();
       for (let i = 0; i < period; i++) {
         const move = demoMove(i);
-        renderer.draw(new NullCanvas(), width, height, model, DEMO_YAW, DEMO_PITCH);
+        renderer.draw(new NullCanvas(), width, height, model, at(DEMO_YAW, DEMO_PITCH));
         const guide = renderer.getSwipeGuide(move);
         assert.ok(guide instanceof CubeSwipeGuide, `guide for ${moveKey(move)}`);
         const hit = renderer.boxHit(guide.startX, guide.startY);
@@ -254,16 +256,16 @@ const frameBlock = blockFrom(introSource, 'private demoFrame(): void {', 'demoFr
 test('IntroPage camera is front-facing and separate from the game camera', () => {
   assert.ok(Math.abs(DEMO_YAW) >= 0.15 && Math.abs(DEMO_YAW) <= 0.35);
   assert.ok(DEMO_PITCH >= -0.35 && DEMO_PITCH <= -0.15);
-  assert.equal(frameBlock.split('DEMO_YAW, DEMO_PITCH').length - 1, 2, 'both demo draws use the demo camera');
-  assert.match(indexSource, /private yaw: number = 0\.62;/);
-  assert.match(indexSource, /private pitch: number = -0\.42;/);
+  assert.match(introSource, /const DEMO_VIEW: CubeView = CubeView\.fromAngles\(DEMO_YAW, DEMO_PITCH\);/);
+  assert.equal(frameBlock.split('this.demoModel, DEMO_VIEW').length - 1, 2, 'both demo draws use the demo camera');
+  assert.match(indexSource, /private view: CubeView = CubeView\.fromAngles\(0\.62, -0\.42\);/);
 });
 
 test('IntroPage demo loop shares one move and progress between the layer and the fingertip', () => {
-  const rest = frameBlock.indexOf('this.demoModel, DEMO_YAW, DEMO_PITCH);');
+  const rest = frameBlock.indexOf('this.demoModel, DEMO_VIEW);');
   const guide = frameBlock.indexOf('this.demoGuide = this.demoRenderer.getSwipeGuide(this.demoMove(cycle));');
   assert.ok(rest >= 0 && guide > rest, 'guide is fetched after a rest frame');
-  assert.match(frameBlock, /DEMO_YAW, DEMO_PITCH, move, progress\);\s*this\.drawTouch\(t, progress\);/);
+  assert.match(frameBlock, /DEMO_VIEW, move, progress\);\s*this\.drawTouch\(t, progress\);/);
   assert.match(introSource, /if \(guide === null\) \{ return; \}/);
 });
 
