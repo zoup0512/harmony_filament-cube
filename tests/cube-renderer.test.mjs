@@ -36,7 +36,7 @@ const orders = [2, 3, 4, 5, 6, 7];
 const width = 420;
 const height = 500;
 const yawAngles = [0, 0.62, -0.8, 1.57, 2.6, 3.14, -2.3];
-const pitchAngles = [-1.3, -0.42, 0, 0.73, 1.5];
+const pitchAngles = [-1.3, -0.42, 0, 0.73, 1.5, 2.6, -2.9];
 
 // The mock checks Canvas usage/finite coordinates, but does not rasterize pixels.
 class CheckingCanvas {

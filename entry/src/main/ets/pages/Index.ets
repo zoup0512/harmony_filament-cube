@@ -96,6 +96,7 @@ struct Index {
   private pointerCount: number = 0;
   private blockedTouch: boolean = false;
   private orbitDragging: boolean = false;
+  private orbitYawSign: number = 1;
   private gestureVersion: number = 0;
   private downVersion: number = 0;
   private downSession: number = 0;
@@ -824,6 +825,7 @@ struct Index {
     this.startY = this.lastY = y / points.length;
     this.pointerCount = points.length;
     this.orbitDragging = false;
+    this.orbitYawSign = Math.cos(this.pitch) < 0 ? -1 : 1;
   }
 
   private moveOrbit(x: number, y: number): void {
@@ -833,8 +835,10 @@ struct Index {
     this.orbitDragging = true;
     // worldToCamera applies Y(-yaw), then X(-pitch): subtract screen deltas.
     const moved = x !== this.lastX || y !== this.lastY;
-    this.yaw -= (x - this.lastX) * 0.009;
-    this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - (y - this.lastY) * 0.009));
+    const yaw = this.yaw - this.orbitYawSign * (x - this.lastX) * 0.009;
+    const pitch = this.pitch - (y - this.lastY) * 0.009;
+    this.yaw = yaw - Math.round(yaw / (Math.PI * 2)) * Math.PI * 2;
+    this.pitch = pitch - Math.round(pitch / (Math.PI * 2)) * Math.PI * 2;
     this.lastX = x;
     this.lastY = y;
     if (moved && !this.busy) { this.draw(); }

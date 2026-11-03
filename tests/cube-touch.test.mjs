@@ -143,16 +143,35 @@ for (const [dx, dy] of [[60, 30], [-60, -30], [0, 30], [30, 0]]) {
     assertReleased(h);
   });
 }
-for (const [dy, pitch] of [[1000, -1.45], [-1000, 1.45]]) {
-  test(`pitch clamps to ${pitch} and reverses immediately`, () => {
+function wrapped(angle) {
+  return angle - Math.round(angle / (Math.PI * 2)) * Math.PI * 2;
+}
+for (const dy of [1000, -1000]) {
+  test(`pitch tumbles past the poles without clamping (${dy})`, () => {
     const h = harness({ hit: false });
     start(h);
     h.send(TouchType.Move, [point(42, 100, 100 + dy)]);
-    near(h.state.pitch, pitch);
+    near(h.state.pitch, wrapped(-0.42 - dy * 0.009));
+    assert.ok(Math.abs(h.state.pitch) <= Math.PI);
     h.send(TouchType.Move, [point(42, 100, 100 + dy - Math.sign(dy) * 10)]);
-    near(h.state.pitch, pitch + Math.sign(dy) * 0.09);
+    near(h.state.pitch, wrapped(-0.42 - dy * 0.009 + Math.sign(dy) * 0.09));
   });
 }
+test('upside-down orbit keeps horizontal drags following the finger', () => {
+  const h = harness({ hit: false });
+  h.state.pitch = 2.8;
+  start(h);
+  h.send(TouchType.Move, [point(42, 160, 100)]);
+  near(h.state.yaw, 0.62 + 60 * 0.009);
+  h.send(TouchType.Move, [point(42, 160, 300)]);
+  near(h.state.pitch, wrapped(2.8 - 200 * 0.009));
+  h.send(TouchType.Move, [point(42, 170, 300)]);
+  near(h.state.yaw, 0.62 + 70 * 0.009);
+  up(h, 170, 300);
+  start(h);
+  h.send(TouchType.Move, [point(42, 160, 100)]);
+  near(h.state.yaw, 0.62 + 10 * 0.009);
+});
 for (const [dx, dy] of [[0, 0], [7.99, 0], [0, -8], [5, 5]]) {
   test(`orbit slop suppresses jitter (${dx}, ${dy}) through Up`, () => {
     const h = harness({ hit: false });
