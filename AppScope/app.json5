@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.razor.filament.cube",
     "vendor": "Razor",
-    "versionCode": 3,
-    "versionName": "1.0.2",
+    "versionCode": 5,
+    "versionName": "1.0.4",
     "icon": "$media:app_icon",
     "label": "$string:app_name",
     "bundleType": "app"

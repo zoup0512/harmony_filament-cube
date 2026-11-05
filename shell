@@ -1,0 +1,1 @@
+hvigorw assembleApp --mode project -p product=release -p buildMode=release --no-daemon
